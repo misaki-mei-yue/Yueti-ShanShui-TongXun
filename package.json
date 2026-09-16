@@ -1,0 +1,60 @@
+{
+  "name": "mojing",
+  "version": "1.0.0",
+  "description": "墨境 — 东方美学通讯桌面应用",
+  "author": "MEI",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --x64 --publish never",
+    "dist:nsis": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "electron-builder --linux AppImage --x64 --publish never",
+    "dist:dir": "electron-builder --win dir --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mei.mojing",
+    "productName": "墨境",
+    "copyright": "Copyright MEI",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "package.json",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Mojing-${version}-portable.${ext}"
+    },
+    "portable": {
+      "artifactName": "Mojing-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "artifactName": "Mojing-${version}-Setup.${ext}",
+      "shortcutName": "墨境",
+      "uninstallDisplayName": "墨境"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Network",
+      "artifactName": "Mojing-${version}.${ext}",
+      "icon": "build/icon.png"
+    },
+    "forceCodeSigning": false
+  }
+}

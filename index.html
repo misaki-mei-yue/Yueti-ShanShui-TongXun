@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>墨境 - 东方美学通讯应用</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- Three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <!-- GSAP 动画库 -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.11.4/dist/gsap.min.js"></script>
+    <!-- 自定义 Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1E88E5',
+                        secondary: '#FF9800',
+                        neutral: '#F5F5F5',
+                        dark: '#121212',
+                        'ink-light': '#F5F5F5',
+                        'ink-medium': '#666666',
+                        'ink-dark': '#333333',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        serif: ['"Noto Serif SC"', 'serif'],
+                    },
+                    animation: {
+                        'ink-float': 'inkFloat 8s ease-in-out infinite',
+                        'ink-spread': 'inkSpread 2s ease-out forwards',
+                        'fade-in': 'fadeIn 0.5s ease-out forwards',
+                        'slide-in': 'slideIn 0.5s ease-out forwards',
+                    },
+                    keyframes: {
+                        inkFloat: {
+                            '0%, 100%': { transform: 'translateY(0) rotate(0deg)' },
+                            '50%': { transform: 'translateY(-10px) rotate(2deg)' },
+                        },
+                        inkSpread: {
+                            '0%': { transform: 'scale(0)', opacity: 0 },
+                            '100%': { transform: 'scale(1)', opacity: 1 },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: 0 },
+                            '100%': { opacity: 1 },
+                        },
+                        slideIn: {
+                            '0%': { transform: 'translateX(-20px)', opacity: 0 },
+                            '100%': { transform: 'translateX(0)', opacity: 1 },
+                        },
+                    },
+                    backgroundImage: {
+                        'ink-texture': "url('data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect width='200' height='200' fill='%23F5F5F5'/%3E%3Ccircle cx='40' cy='50' r='30' fill='%23000' fill-opacity='0.03'/%3E%3Ccircle cx='140' cy='120' r='50' fill='%23000' fill-opacity='0.04'/%3E%3C/svg%3E')",
+                        'ink-landscape': "url('data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E')",
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .text-shadow {
+                text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+            }
+            .ink-border {
+                border: 1px solid rgba(0, 0, 0, 0.1);
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            }
+            .ink-card {
+                background-color: rgba(255, 255, 255, 0.85);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            }
+            .ink-card-dark {
+                background-color: rgba(18, 18, 18, 0.85);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            }
+            .ink-button {
+                transition: all 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            }
+            .ink-button::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 0;
+                height: 0;
+                border-radius: 50%;
+                background-color: rgba(255, 255, 255, 0.3);
+                transform: translate(-50%, -50%);
+                transition: width 0.6s, height 0.6s;
+            }
+            .ink-button:active::after {
+                width: 300px;
+                height: 300px;
+            }
+            .scrollbar-hidden::-webkit-scrollbar {
+                display: none;
+            }
+            .scrollbar-hidden {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+            }
+            .chat-bubble-left {
+                position: relative;
+                border-radius: 18px 18px 18px 0;
+            }
+            .chat-bubble-right {
+                position: relative;
+                border-radius: 18px 18px 0 18px;
+            }
+            .chat-bubble-left::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: -8px;
+                width: 0;
+                height: 0;
+                border-style: solid;
+                border-width: 0 0 10px 10px;
+                border-color: transparent transparent rgba(243, 244, 246, 0.8) transparent;
+            }
+            .chat-bubble-right::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                right: -8px;
+                width: 0;
+                height: 0;
+                border-style: solid;
+                border-width: 0 0 10px 10px;
+                border-color: transparent transparent rgba(59, 130, 246, 0.8) transparent;
+            }
+            .ink-splash {
+                position: absolute;
+                border-radius: 50%;
+                transform: scale(0);
+                animation: inkSplash 0.6s ease-out;
+                pointer-events: none;
+            }
+            @keyframes inkSplash {
+                to {
+                    transform: scale(4);
+                    opacity: 0;
+                }
+            }
+            .avatar-frame {
+                position: relative;
+                overflow: hidden;
+                border-radius: 50%;
+            }
+            .avatar-frame::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                border: 2px solid rgba(59, 130, 246, 0.5);
+                border-radius: 50%;
+                opacity: 0;
+                animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+                0% {
+                    transform: scale(0.95);
+                    opacity: 0.7;
+                }
+                70% {
+                    transform: scale(1.05);
+                    opacity: 0;
+                }
+                100% {
+                    transform: scale(0.95);
+                    opacity: 0;
+                }
+            }
+            .status-online::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                width: 12px;
+                height: 12px;
+                background-color: #10B981;
+                border: 2px solid white;
+                border-radius: 50%;
+            }
+            .status-away::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                width: 12px;
+                height: 12px;
+                background-color: #F59E0B;
+                border: 2px solid white;
+                border-radius: 50%;
+            }
+            .status-busy::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                width: 12px;
+                height: 12px;
+                background-color: #EF4444;
+                border: 2px solid white;
+                border-radius: 50%;
+            }
+            .status-offline::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                width: 12px;
+                height: 12px;
+                background-color: #9CA3AF;
+                border: 2px solid white;
+                border-radius: 50%;
+            }
+            .ink-transition {
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .menu-item {
+                position: relative;
+                transition: all 0.3s ease;
+            }
+            .menu-item::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 3px;
+                background-color: #1E88E5;
+                transform: scaleY(0);
+                transition: transform 0.3s ease;
+            }
+            .menu-item:hover::before,
+            .menu-item.active::before {
+                transform: scaleY(1);
+            }
+            .menu-item:hover,
+            .menu-item.active {
+                background-color: rgba(30, 136, 229, 0.08);
+            }
+            .scene-container {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: -1;
+                opacity: 0.2;
+            }
+        }
+    
+            .fade-out {
+                opacity: 0;
+                transition: opacity 0.7s ease;
+                pointer-events: none;
+            }
+</style>
+</head>
+<body class="bg-ink-light text-ink-dark min-h-screen font-sans antialiased">
+
+<!-- =============================================
+     启动界面（QQ风格）
+============================================= -->
+<div id="startup-screen" class="fixed inset-0 bg-white flex flex-col items-center justify-center z-50 animate-fade-in">
+    <div class="w-28 h-28 rounded-2xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center mb-6 shadow-lg">
+        <i class="fa fa-paint-brush text-white text-5xl"></i>
+    </div>
+    <h1 class="text-3xl font-bold text-ink-dark">墨境</h1>
+    <p class="text-ink-medium mt-2">东方美学 · 智能通讯</p>
+</div>
+
+<!-- =============================================
+     登录 / 注册 界面
+============================================= -->
+<div id="auth-screen" class="hidden fixed inset-0 bg-white z-40">
+    <div class="max-w-sm mx-auto px-6 pt-24">
+        <h1 class="text-2xl font-bold text-center mb-8">账号登录</h1>
+        
+        <input id="login-account" placeholder="请输入账号" 
+            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-primary">
+        
+        <input id="login-pwd" type="password" placeholder="请输入密码" 
+            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-primary">
+        
+        <button id="login-btn" 
+            class="w-full bg-primary text-white py-3 rounded-lg mb-3 ink-button">登录</button>
+        
+        <button id="go-register" class="w-full text-primary text-center">没有账号？立即注册</button>
+    </div>
+
+    <div id="register-panel" class="hidden max-w-sm mx-auto px-6 pt-20">
+        <h1 class="text-2xl font-bold text-center mb-8">注册账号</h1>
+        
+        <input id="reg-account" placeholder="设置账号" 
+            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-primary">
+        
+        <input id="reg-pwd" type="password" placeholder="设置密码" 
+            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-primary">
+        
+        <button id="register-btn" 
+            class="w-full bg-primary text-white py-3 rounded-lg mb-3 ink-button">注册</button>
+        
+        <button id="back-login" class="w-full text-primary text-center">返回登录</button>
+    </div>
+</div>
+
+
+    <!-- 3D 水墨背景场景 -->
+    <div id="scene-container" class="scene-container"></div>
+
+    <!-- 主应用容器 -->
+    <div id="main-app" class="hidden flex h-screen overflow-hidden">
+        <!-- 左侧导航栏 -->
+        <aside class="w-64 bg-white bg-opacity-90 backdrop-blur-sm border-r border-gray-100 shadow-sm z-10 transition-all duration-300 ease-in-out" id="sidebar">
+            <!-- 用户信息 -->
+            <div class="p-4 border-b border-gray-100 flex items-center space-x-3">
+                <div class="avatar-frame status-online w-12 h-12 cursor-pointer hover:opacity-80 transition-opacity" id="user-avatar">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover" id="user-avatar-img">
+                    <input type="file" id="avatar-input" accept="image/*" class="hidden">
+                </div>
+                <div>
+                    <h3 id="sidebar-username" class="font-medium text-ink-dark">墨境用户</h3>
+                    <p class="text-xs text-ink-medium">在线</p>
+                </div>
+                <button id="logout-btn" title="退出登录" class="ml-auto text-ink-medium hover:text-primary transition-colors">
+                    <i class="fa fa-sign-out"></i>
+                </button>
+            </div>
+
+            <!-- 搜索加好友 -->
+            <div class="p-4 border-b border-gray-100">
+                <input id="search-friend-input" placeholder="搜索账号添加好友"
+                    class="w-full border border-gray-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary mb-2">
+                <button id="search-friend-btn"
+                    class="w-full bg-primary text-white py-1.5 rounded-lg text-sm ink-button">搜索并添加好友</button>
+            </div>
+
+            <!-- 导航菜单 -->
+            <nav class="p-2">
+                <ul class="space-y-1">
+                    <li>
+                        <a href="#" class="menu-item active flex items-center p-3 rounded-lg" data-target="chat-section">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="消息" class="w-6 h-6 mr-3">
+                            <span>消息</span>
+                            <span class="ml-auto bg-secondary text-white text-xs px-2 py-0.5 rounded-full">3</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="contacts-section">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="联系人" class="w-6 h-6 mr-3">
+                            <span>联系人</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="moments-section">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="动态" class="w-6 h-6 mr-3">
+                            <span>动态</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="files-section">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="文件" class="w-6 h-6 mr-3">
+                            <span>文件</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="mt-6 pt-4 border-t border-gray-100">
+                    <h4 class="px-3 text-xs font-medium text-ink-medium uppercase tracking-wider mb-2">特色功能</h4>
+                    <ul class="space-y-1">
+                        <li>
+                            <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="art-chat-section">
+                                <i class="fa fa-paint-brush mr-3 text-primary"></i>
+                                <span>艺术聊天室</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="smart-workspace-section">
+                                <i class="fa fa-lightbulb-o mr-3 text-primary"></i>
+                                <span>智慧协作空间</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="game-hall-section">
+                                <i class="fa fa-gamepad mr-3 text-primary"></i>
+                                <span>社交游戏厅</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 底部工具栏 -->
+            <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100 flex items-center justify-between">
+                <button class="text-ink-medium hover:text-primary transition-colors" id="theme-toggle">
+                    <i class="fa fa-moon-o"></i>
+                </button>
+                <button class="text-ink-medium hover:text-primary transition-colors">
+                    <i class="fa fa-search"></i>
+                </button>
+                <button class="text-ink-medium hover:text-primary transition-colors">
+                    <i class="fa fa-plus-circle"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- 中央内容区 -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <!-- 聊天模块 -->
+            <section id="chat-section" class="flex-1 flex flex-col h-full">
+                <!-- 聊天头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="avatar-frame status-online w-10 h-10">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div>
+                            <h3 id="chat-contact-name" class="font-medium text-ink-dark">王羲之</h3>
+                            <p id="chat-contact-status" class="text-xs text-ink-medium">正在输入...</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-phone"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-video-camera"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-info-circle"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 聊天内容区 -->
+                <div class="flex-1 overflow-y-auto p-4 space-y-4" id="chat-messages">
+                    <!-- 日期分隔符 -->
+                    <div class="flex justify-center">
+                        <span class="bg-gray-100 text-ink-medium text-xs px-3 py-1 rounded-full">今天 14:30</span>
+                    </div>
+
+                    <!-- 对方消息 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
+                            <p>你好，最近在研究什么书法？</p>
+                        </div>
+                        <span class="text-xs text-ink-medium">14:30</span>
+                    </div>
+
+                    <!-- 我的消息 -->
+                    <div class="flex items-end justify-end space-x-2">
+                        <span class="text-xs text-ink-medium">14:32</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-80 text-white p-3 max-w-xs md:max-w-md">
+                            <p>我最近在练习行书，特别喜欢《兰亭序》的笔法。你呢？</p>
+                        </div>
+                    </div>
+
+                    <!-- 对方消息 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
+                            <p>巧了，我也在研究《兰亭序》！我发现王羲之的笔法变化多端，尤其是在"之"字的处理上，每个都不同。</p>
+                        </div>
+                        <span class="text-xs text-ink-medium">14:35</span>
+                    </div>
+
+                    <!-- 对方消息 - 图片 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-2 max-w-xs md:max-w-md">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg max-w-full h-auto">
+                            <p class="text-xs mt-1">我临摹的《兰亭序》片段</p>
+                        </div>
+                        <span class="text-xs text-ink-medium">14:36</span>
+                    </div>
+
+                    <!-- 我的消息 -->
+                    <div class="flex items-end justify-end space-x-2">
+                        <span class="text-xs text-ink-medium">14:38</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-80 text-white p-3 max-w-xs md:max-w-md">
+                            <p>太棒了！笔法很流畅。我也分享一下我的练习。</p>
+                        </div>
+                    </div>
+
+                    <!-- 我的消息 - 图片 -->
+                    <div class="flex items-end justify-end space-x-2">
+                        <span class="text-xs text-ink-medium">14:39</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-80 text-white p-2 max-w-xs md:max-w-md">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg max-w-full h-auto">
+                            <p class="text-xs mt-1">我的山水画练习</p>
+                        </div>
+                    </div>
+
+                    <!-- 对方消息 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
+                            <p>山水画也很有意境！我们可以交流一下技法。</p>
+                        </div>
+                        <span class="text-xs text-ink-medium">14:40</span>
+                    </div>
+
+                    <!-- AI 智能回复建议 -->
+                    <div class="flex justify-center">
+                        <div class="bg-white bg-opacity-80 backdrop-blur-sm p-2 rounded-lg shadow-sm flex space-x-2 overflow-x-auto scrollbar-hidden">
+                            <button class="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors whitespace-nowrap" onclick="sendMessage(this)">
+                                好啊，我们可以定期交流
+                            </button>
+                            <button class="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors whitespace-nowrap" onclick="sendMessage(this)">
+                                你对山水画的皴法有什么见解？
+                            </button>
+                            <button class="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors whitespace-nowrap" onclick="sendMessage(this)">
+                                我们可以一起参加书法展览
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 聊天输入区 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-t border-gray-100 shadow-sm">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-smile-o"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-paperclip"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-picture-o"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-microphone"></i>
+                        </button>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <input type="text" id="message-input" placeholder="输入消息..." class="flex-1 border border-gray-200 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <button id="send-button" class="bg-primary text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-primary-dark transition-colors">
+                            <i class="fa fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 联系人模块 -->
+            <section id="contacts-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 联系人头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm">
+                    <div class="relative">
+                        <input type="text" placeholder="搜索联系人..." class="w-full border border-gray-200 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <i class="fa fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-ink-medium"></i>
+                    </div>
+                </div>
+
+                <!-- 联系人分类 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-2 border-b border-gray-100">
+                    <div class="flex space-x-2 overflow-x-auto scrollbar-hidden">
+                        <button class="px-4 py-2 bg-primary text-white rounded-full text-sm whitespace-nowrap">全部</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">好友</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">家人</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">同事</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">群组</button>
+                    </div>
+                </div>
+
+                <!-- 联系人列表 -->
+                <div class="flex-1 overflow-y-auto" id="all-contacts-list">
+                    <!-- AI 助手 -->
+                    <div class="border-b border-gray-100">
+                        <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-ink-medium uppercase tracking-wider">AI 助手</div>
+                        <ul>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer"
+                                id="ai-assistant"
+                                data-contact-id="ai-assistant"
+                                data-contact-name="电子宠物小月啼">
+                                <div class="avatar-frame status-online w-10 h-10 mr-3 bg-gradient-to-br from-primary to-purple-500">
+                                    <i class="fa fa-robot text-white text-xl flex items-center justify-center w-full h-full"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">电子宠物小月啼</h3>
+                                    <p class="text-xs text-ink-medium truncate">随时为您解答 · 本地智能助手</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                    <!-- 我的好友（本地账号） -->
+                    <div class="border-b border-gray-100">
+                        <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-ink-medium uppercase tracking-wider">我的好友</div>
+                        <ul id="user-friend-list">
+                        </ul>
+                    </div>
+
+                    <!-- 联系人分组 -->
+                    <div class="border-b border-gray-100">
+                        <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-ink-medium uppercase tracking-wider">
+                            常用联系人
+                        </div>
+                        <ul>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                                <div class="avatar-frame status-online w-10 h-10 mr-3">
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">王羲之</h3>
+                                    <p class="text-xs text-ink-medium truncate">正在输入...</p>
+                                </div>
+                            </li>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                                <div class="avatar-frame status-away w-10 h-10 mr-3">
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">颜真卿</h3>
+                                    <p class="text-xs text-ink-medium truncate">稍等，我在忙</p>
+                                </div>
+                            </li>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                                <div class="avatar-frame status-busy w-10 h-10 mr-3">
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">柳公权</h3>
+                                    <p class="text-xs text-ink-medium truncate">会议中</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="border-b border-gray-100">
+                        <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-ink-medium uppercase tracking-wider">
+                            A
+                        </div>
+                        <ul>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                                <div class="avatar-frame status-online w-10 h-10 mr-3">
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">欧阳询</h3>
+                                    <p class="text-xs text-ink-medium truncate">最近在研究九成宫醴泉铭</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="border-b border-gray-100">
+                        <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-ink-medium uppercase tracking-wider">
+                            S
+                        </div>
+                        <ul>
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                                <div class="avatar-frame status-offline w-10 h-10 mr-3">
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-medium text-ink-dark">苏轼</h3>
+                                    <p class="text-xs text-ink-medium truncate">3天前在线</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 动态模块 -->
+            <section id="moments-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 动态头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
+                    <h2 class="text-lg font-medium text-ink-dark">动态</h2>
+                    <button class="text-primary hover:text-primary-dark transition-colors">
+                        <i class="fa fa-plus-circle"></i> 发布
+                    </button>
+                </div>
+
+                <!-- 动态内容区 -->
+                <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                    <!-- 动态卡片 -->
+                    <div class="ink-card p-4">
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="avatar-frame w-10 h-10">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                            </div>
+                            <div>
+                                <h3 class="font-medium text-ink-dark">王羲之</h3>
+                                <p class="text-xs text-ink-medium">2小时前</p>
+                            </div>
+                            <button class="ml-auto text-ink-medium hover:text-primary transition-colors">
+                                <i class="fa fa-ellipsis-h"></i>
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <p class="text-ink-dark">今天练习了《兰亭序》，分享一下心得。笔法的变化要自然，尤其是在转折处，要注意笔锋的转换。</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mb-3">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
+                        </div>
+                        <div class="flex items-center justify-between text-ink-medium text-sm">
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-thumbs-up"></i>
+                                <span>32</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-comment"></i>
+                                <span>8</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-share"></i>
+                                <span>分享</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 动态卡片 -->
+                    <div class="ink-card p-4">
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="avatar-frame w-10 h-10">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                            </div>
+                            <div>
+                                <h3 class="font-medium text-ink-dark">颜真卿</h3>
+                                <p class="text-xs text-ink-medium">昨天</p>
+                            </div>
+                            <button class="ml-auto text-ink-medium hover:text-primary transition-colors">
+                                <i class="fa fa-ellipsis-h"></i>
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <p class="text-ink-dark">参观了故宫博物院的书法展览，看到了很多珍贵的碑帖真迹，收获很大！分享几张照片。</p>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 mb-3">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect width='400' height='300' fill='%23EDE8DF'/%3E%3Cpath d='M0 200 Q100 140 200 190 T400 170 L400 300 L0 300 Z' fill='%23444' fill-opacity='0.35'/%3E%3Ctext x='200' y='150' text-anchor='middle' font-size='18' fill='%23666' font-family='serif'%3E水墨留白%3C/text%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                        </div>
+                        <div class="flex items-center justify-between text-ink-medium text-sm">
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-thumbs-up"></i>
+                                <span>45</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-comment"></i>
+                                <span>12</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-share"></i>
+                                <span>分享</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 动态卡片 -->
+                    <div class="ink-card p-4">
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="avatar-frame w-10 h-10">
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                            </div>
+                            <div>
+                                <h3 class="font-medium text-ink-dark">柳公权</h3>
+                                <p class="text-xs text-ink-medium">3天前</p>
+                            </div>
+                            <button class="ml-auto text-ink-medium hover:text-primary transition-colors">
+                                <i class="fa fa-ellipsis-h"></i>
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <p class="text-ink-dark">推荐一本好书《书法美学》，对理解书法艺术很有帮助。</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 mb-3 flex items-center space-x-3">
+                            <div class="bg-primary bg-opacity-10 rounded-lg p-2">
+                                <i class="fa fa-book text-primary text-xl"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-medium text-ink-dark">书法美学</h4>
+                                <p class="text-xs text-ink-medium">中国书法艺术的美学原理与实践</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between text-ink-medium text-sm">
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-thumbs-up"></i>
+                                <span>28</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-comment"></i>
+                                <span>5</span>
+                            </button>
+                            <button class="flex items-center space-x-1 hover:text-primary transition-colors">
+                                <i class="fa fa-share"></i>
+                                <span>分享</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 文件模块 -->
+            <section id="files-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 文件头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm">
+                    <div class="relative">
+                        <input type="text" placeholder="搜索文件..." class="w-full border border-gray-200 rounded-full px-4 py-2 pl-10 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <i class="fa fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-ink-medium"></i>
+                    </div>
+                </div>
+
+                <!-- 文件分类 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-2 border-b border-gray-100">
+                    <div class="flex space-x-2 overflow-x-auto scrollbar-hidden">
+                        <button class="px-4 py-2 bg-primary text-white rounded-full text-sm whitespace-nowrap">全部</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">文档</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">图片</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">视频</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">音频</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">压缩包</button>
+                    </div>
+                </div>
+
+                <!-- 文件列表 -->
+                <div class="flex-1 overflow-y-auto">
+                    <div class="p-4">
+                        <h3 class="text-sm font-medium text-ink-medium mb-2">最近文件</h3>
+                        <div class="space-y-2">
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-blue-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-word-o text-blue-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">书法学习笔记.docx</h4>
+                                    <p class="text-xs text-ink-medium">Word文档 · 2MB · 昨天</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-red-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-pdf-o text-red-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">《兰亭序》笔法解析.pdf</h4>
+                                    <p class="text-xs text-ink-medium">PDF文档 · 5MB · 3天前</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-green-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-image-o text-green-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">山水画练习.jpg</h4>
+                                    <p class="text-xs text-ink-medium">图片 · 3MB · 4天前</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-purple-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-excel-o text-purple-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">书法课程表.xlsx</h4>
+                                    <p class="text-xs text-ink-medium">Excel表格 · 1MB · 1周前</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 pt-0">
+                        <h3 class="text-sm font-medium text-ink-medium mb-2">收藏文件</h3>
+                        <div class="space-y-2">
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-yellow-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-video-o text-yellow-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">书法教学视频.mp4</h4>
+                                    <p class="text-xs text-ink-medium">视频 · 100MB · 2周前</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                            <div class="ink-card p-3 flex items-center hover:shadow-md transition-shadow">
+                                <div class="bg-blue-100 p-2 rounded-lg mr-3">
+                                    <i class="fa fa-file-zip-o text-blue-500 text-xl"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-ink-dark text-sm">书法字体库.zip</h4>
+                                    <p class="text-xs text-ink-medium">压缩包 · 50MB · 1个月前</p>
+                                </div>
+                                <button class="text-ink-medium hover:text-primary transition-colors">
+                                    <i class="fa fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 艺术聊天室模块 -->
+            <section id="art-chat-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 艺术聊天室头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-full bg-primary bg-opacity-20 flex items-center justify-center">
+                            <i class="fa fa-paint-brush text-primary"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-medium text-ink-dark">艺术聊天室</h3>
+                            <p class="text-xs text-ink-medium">8人在线</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-magic"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-users"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-info-circle"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 艺术聊天室内容区 -->
+                <div class="flex-1 overflow-y-auto p-4 space-y-4" style="background-image: url('data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E'); background-size: cover; background-position: center;">
+                    <!-- 日期分隔符 -->
+                    <div class="flex justify-center">
+                        <span class="bg-white bg-opacity-70 text-ink-medium text-xs px-3 py-1 rounded-full backdrop-blur-sm">今天 15:30</span>
+                    </div>
+
+                    <!-- 对方消息 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
+                            <p>山水之间有真意，墨色浓淡总关情</p>
+                        </div>
+                        <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:30</span>
+                    </div>
+
+                    <!-- 对方消息 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect width='400' height='300' fill='%23EDE8DF'/%3E%3Cpath d='M0 200 Q100 140 200 190 T400 170 L400 300 L0 300 Z' fill='%23444' fill-opacity='0.35'/%3E%3Ctext x='200' y='150' text-anchor='middle' font-size='18' fill='%23666' font-family='serif'%3E水墨留白%3C/text%3E%3C/svg%3E" alt="水墨画" class="rounded-lg max-w-full h-auto">
+                            <p class="text-xs mt-1">我画的水墨元素</p>
+                        </div>
+                        <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:32</span>
+                    </div>
+
+                    <!-- 我的消息 -->
+                    <div class="flex items-end justify-end space-x-2">
+                        <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:33</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-70 backdrop-blur-sm text-white p-3 max-w-xs md:max-w-md border border-primary border-opacity-30">
+                            <p>笔法精妙，意境深远</p>
+                        </div>
+                    </div>
+
+                    <!-- 对方消息 - 语音转书画 -->
+                    <div class="flex items-end space-x-2">
+                        <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                        </div>
+                        <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <i class="fa fa-microphone text-primary"></i>
+                                <span class="text-xs text-ink-medium">语音消息 · 5秒</span>
+                            </div>
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="语音转书画" class="rounded-lg max-w-full h-auto">
+                            <p class="text-xs mt-1 text-ink-medium italic">语音转书画："青山绿水，鸟语花香"</p>
+                        </div>
+                        <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:35</span>
+                    </div>
+
+                    <!-- 艺术表情 -->
+                    <div class="flex items-end justify-end space-x-2">
+                        <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:36</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-70 backdrop-blur-sm text-white p-3 max-w-xs md:max-w-md border border-primary border-opacity-30">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="艺术表情" class="w-20 h-auto">
+                        </div>
+                    </div>
+
+                    <!-- 对诗模式提示 -->
+                    <div class="flex justify-center">
+                        <span class="bg-white bg-opacity-70 text-primary text-xs px-3 py-1 rounded-full backdrop-blur-sm">
+                            <i class="fa fa-magic mr-1"></i> 对诗模式已开启，对话将自动押韵
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 艺术聊天室输入区 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-t border-gray-100 shadow-sm">
+                    <div class="flex items-center space-x-3 mb-2">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="表情" class="w-5 h-5">
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-paperclip"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-picture-o"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-microphone"></i>
+                        </button>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <input type="text" placeholder="输入诗句..." class="flex-1 border border-gray-200 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <button class="bg-primary text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-primary-dark transition-colors">
+                            <i class="fa fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 智慧协作空间模块 -->
+            <section id="smart-workspace-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 智慧协作空间头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-full bg-primary bg-opacity-20 flex items-center justify-center">
+                            <i class="fa fa-lightbulb-o text-primary"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-medium text-ink-dark">智慧协作空间</h3>
+                            <p class="text-xs text-ink-medium">书法研究小组 · 5人在线</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-calendar-plus-o"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-users"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-cog"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 智慧协作空间内容区 -->
+                <div class="flex-1 overflow-hidden">
+                    <div class="flex h-full">
+                        <!-- 左侧工具栏 -->
+                        <div class="w-16 bg-white bg-opacity-90 backdrop-blur-sm border-r border-gray-100 flex flex-col items-center py-4 space-y-6">
+                            <button class="w-10 h-10 rounded-lg bg-primary bg-opacity-10 flex items-center justify-center text-primary hover:bg-opacity-20 transition-colors">
+                                <i class="fa fa-pencil"></i>
+                            </button>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-paint-brush"></i>
+                            </button>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-image"></i>
+                            </button>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-text-height"></i>
+                            </button>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-object-group"></i>
+                            </button>
+                            <div class="border-t border-gray-200 w-8 my-2"></div>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-save"></i>
+                            </button>
+                            <button class="w-10 h-10 rounded-lg flex items-center justify-center text-ink-medium hover:bg-gray-100 transition-colors">
+                                <i class="fa fa-share-alt"></i>
+                            </button>
+                        </div>
+
+                        <!-- 中央协作区 -->
+                        <div class="flex-1 overflow-auto bg-white bg-opacity-50 p-8">
+                            <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-sm min-h-[500px] p-6">
+                                <h1 class="text-2xl font-medium text-ink-dark mb-4">书法艺术研究计划</h1>
+                                
+                                <!-- 思维导图 -->
+                                <div class="mb-6">
+                                    <h2 class="text-lg font-medium text-ink-dark mb-3">研究方向</h2>
+                                    <div class="relative pl-8 border-l-2 border-primary">
+                                        <div class="mb-4 relative">
+                                            <div class="absolute -left-[34px] w-5 h-5 rounded-full bg-primary"></div>
+                                            <h3 class="text-md font-medium text-ink-dark">楷书研究</h3>
+                                            <div class="ml-4 mt-2 pl-4 border-l-2 border-gray-200">
+                                                <p class="text-sm text-ink-medium mb-2">颜真卿《颜勤礼碑》</p>
+                                                <p class="text-sm text-ink-medium mb-2">柳公权《玄秘塔碑》</p>
+                                                <p class="text-sm text-ink-medium">欧阳询《九成宫醴泉铭》</p>
+                                            </div>
+                                        </div>
+                                        <div class="mb-4 relative">
+                                            <div class="absolute -left-[34px] w-5 h-5 rounded-full bg-primary"></div>
+                                            <h3 class="text-md font-medium text-ink-dark">行书研究</h3>
+                                            <div class="ml-4 mt-2 pl-4 border-l-2 border-gray-200">
+                                                <p class="text-sm text-ink-medium mb-2">王羲之《兰亭序》</p>
+                                                <p class="text-sm text-ink-medium mb-2">颜真卿《祭侄文稿》</p>
+                                                <p class="text-sm text-ink-medium">苏轼《黄州寒食帖》</p>
+                                            </div>
+                                        </div>
+                                        <div class="relative">
+                                            <div class="absolute -left-[34px] w-5 h-5 rounded-full bg-primary"></div>
+                                            <h3 class="text-md font-medium text-ink-dark">草书研究</h3>
+                                            <div class="ml-4 mt-2 pl-4 border-l-2 border-gray-200">
+                                                <p class="text-sm text-ink-medium mb-2">张旭《古诗四帖》</p>
+                                                <p class="text-sm text-ink-medium">怀素《自叙帖》</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 协作编辑区域 -->
+                                <div class="mb-6">
+                                    <h2 class="text-lg font-medium text-ink-dark mb-3">研究计划</h2>
+                                    <div class="bg-gray-50 rounded-lg p-4">
+                                        <p class="text-ink-dark mb-2">1. 收集整理历代书法作品资料</p>
+                                        <p class="text-ink-dark mb-2">2. 分析各流派笔法特点</p>
+                                        <p class="text-ink-dark mb-2">3. 进行临摹练习与创作</p>
+                                        <p class="text-ink-dark">4. 举办小型书法展览</p>
+                                    </div>
+                                </div>
+
+                                <!-- 会议纪要 -->
+                                <div>
+                                    <h2 class="text-lg font-medium text-ink-dark mb-3">会议纪要</h2>
+                                    <div class="bg-blue-50 rounded-lg p-4 border-l-4 border-primary">
+                                        <div class="flex items-center space-x-2 mb-2">
+                                            <i class="fa fa-calendar text-primary"></i>
+                                            <span class="text-sm font-medium text-ink-dark">2023年6月15日</span>
+                                        </div>
+                                        <p class="text-sm text-ink-dark mb-2">本次会议讨论了研究计划的具体实施步骤，确定了分工：</p>
+                                        <ul class="text-sm text-ink-dark list-disc pl-5 space-y-1">
+                                            <li>王羲之负责收集资料</li>
+                                            <li>颜真卿负责楷书研究</li>
+                                            <li>柳公权负责行书研究</li>
+                                            <li>欧阳询负责草书研究</li>
+                                            <li>苏轼负责展览策划</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右侧信息面板 -->
+                        <div class="w-64 bg-white bg-opacity-90 backdrop-blur-sm border-l border-gray-100 p-4">
+                            <h3 class="text-sm font-medium text-ink-dark mb-3">协作成员</h3>
+                            <div class="space-y-3 mb-6">
+                                <div class="flex items-center space-x-2">
+                                    <div class="avatar-frame status-online w-8 h-8">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                    </div>
+                                    <span class="text-sm text-ink-dark">王羲之</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="avatar-frame status-online w-8 h-8">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                    </div>
+                                    <span class="text-sm text-ink-dark">颜真卿</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="avatar-frame status-online w-8 h-8">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                    </div>
+                                    <span class="text-sm text-ink-dark">柳公权</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="avatar-frame status-away w-8 h-8">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                    </div>
+                                    <span class="text-sm text-ink-dark">欧阳询</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="avatar-frame status-offline w-8 h-8">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                    </div>
+                                    <span class="text-sm text-ink-dark">苏轼</span>
+                                </div>
+                            </div>
+
+                            <h3 class="text-sm font-medium text-ink-dark mb-3">近期活动</h3>
+                            <div class="space-y-3">
+                                <div class="bg-gray-50 rounded-lg p-3">
+                                    <div class="flex items-center space-x-2 mb-1">
+                                        <i class="fa fa-calendar text-primary"></i>
+                                        <span class="text-xs font-medium text-ink-dark">明天 14:00</span>
+                                    </div>
+                                    <p class="text-xs text-ink-dark">书法作品讨论会</p>
+                                </div>
+                                <div class="bg-gray-50 rounded-lg p-3">
+                                    <div class="flex items-center space-x-2 mb-1">
+                                        <i class="fa fa-calendar text-primary"></i>
+                                        <span class="text-xs font-medium text-ink-dark">6月20日 10:00</span>
+                                    </div>
+                                    <p class="text-xs text-ink-dark">博物馆参观活动</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 社交游戏厅模块 -->
+            <section id="game-hall-section" class="flex-1 flex flex-col h-full hidden">
+                <!-- 社交游戏厅头部 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-full bg-primary bg-opacity-20 flex items-center justify-center">
+                            <i class="fa fa-gamepad text-primary"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-medium text-ink-dark">社交游戏厅</h3>
+                            <p class="text-xs text-ink-medium">12人在线</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-trophy"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-ranking"></i>
+                        </button>
+                        <button class="text-ink-medium hover:text-primary transition-colors">
+                            <i class="fa fa-info-circle"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 游戏分类 -->
+                <div class="bg-white bg-opacity-90 backdrop-blur-sm p-2 border-b border-gray-100">
+                    <div class="flex space-x-2 overflow-x-auto scrollbar-hidden">
+                        <button class="px-4 py-2 bg-primary text-white rounded-full text-sm whitespace-nowrap">全部</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">文字游戏</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">益智游戏</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">AR游戏</button>
+                        <button class="px-4 py-2 bg-gray-100 text-ink-dark rounded-full text-sm whitespace-nowrap">创作游戏</button>
+                    </div>
+                </div>
+
+                <!-- 游戏列表 -->
+                <div class="flex-1 overflow-y-auto p-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- 游戏卡片 -->
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-landscape bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">墨韵对诗</h3>
+                                    <p class="text-xs">AI出上句，用户对下句</p>
+                                </div>
+                                <div class="absolute top-3 right-3 bg-primary text-white text-xs px-2 py-1 rounded-full">
+                                    热门
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">32人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-texture bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">水墨谜题</h3>
+                                    <p class="text-xs">解开水墨画中的谜题</p>
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">18人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-landscape bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">艺术寻宝</h3>
+                                    <p class="text-xs">AR寻宝游戏</p>
+                                </div>
+                                <div class="absolute top-3 right-3 bg-secondary text-white text-xs px-2 py-1 rounded-full">
+                                    新游戏
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">12人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-texture bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">创作接力</h3>
+                                    <p class="text-xs">多人协作创作故事/画作</p>
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">24人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-landscape bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">书法大赛</h3>
+                                    <p class="text-xs">在线书法比赛</p>
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">8人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ink-card overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="relative h-40 bg-ink-texture bg-cover bg-center">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
+                                <div class="absolute bottom-3 left-3 text-white">
+                                    <h3 class="font-medium">诗词接龙</h3>
+                                    <p class="text-xs">诗词接句游戏</p>
+                                </div>
+                            </div>
+                            <div class="p-3 flex items-center justify-between">
+                                <div class="flex items-center space-x-1">
+                                    <i class="fa fa-users text-ink-medium"></i>
+                                    <span class="text-xs text-ink-medium">15人在线</span>
+                                </div>
+                                <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition-colors">
+                                    开始游戏
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 右侧信息面板 -->
+        <aside class="w-64 bg-white bg-opacity-90 backdrop-blur-sm border-l border-gray-100 shadow-sm hidden lg:block" id="info-panel">
+            <!-- 用户资料 -->
+            <div class="p-4 border-b border-gray-100">
+                <div class="flex flex-col items-center">
+                    <div class="avatar-frame status-online w-20 h-20 mb-3">
+                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                    </div>
+                    <h3 class="font-medium text-ink-dark">王羲之</h3>
+                    <p class="text-xs text-ink-medium">书法爱好者</p>
+                    <div class="flex items-center space-x-2 mt-2">
+                        <span class="bg-primary bg-opacity-10 text-primary text-xs px-2 py-1 rounded-full">书法</span>
+                        <span class="bg-primary bg-opacity-10 text-primary text-xs px-2 py-1 rounded-full">山水画</span>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="flex justify-between items-center text-sm mb-2">
+                        <span class="text-ink-medium">个性签名</span>
+                    </div>
+                    <p class="text-sm text-ink-dark">飘若浮云，矫若惊龙</p>
+                </div>
+            </div>
+
+            <!-- 功能入口 -->
+            <div class="p-4 border-b border-gray-100">
+                <h4 class="text-xs font-medium text-ink-medium uppercase tracking-wider mb-3">功能入口</h4>
+                <div class="grid grid-cols-3 gap-2">
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-calendar text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">日程</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-cloud text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">云盘</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-bell text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">通知</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-star text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">收藏</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-headphones text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">音乐</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <i class="fa fa-ellipsis-h text-primary mb-1"></i>
+                        <span class="text-xs text-ink-dark">更多</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI 智能助手 -->
+            <div class="p-4 border-b border-gray-100">
+                <h4 class="text-xs font-medium text-ink-medium uppercase tracking-wider mb-3">AI 智能助手</h4>
+                <div class="bg-primary bg-opacity-5 rounded-lg p-3">
+                    <div class="flex items-center space-x-2 mb-2">
+                        <div class="w-8 h-8 rounded-full bg-primary bg-opacity-20 flex items-center justify-center">
+                            <i class="fa fa-robot text-primary"></i>
+                        </div>
+                        <span class="text-sm font-medium text-ink-dark">墨助手</span>
+                    </div>
+                    <p class="text-xs text-ink-dark mb-3">有什么可以帮您的吗？</p>
+                    <div class="space-y-2">
+                        <button class="w-full text-left text-xs bg-white bg-opacity-70 hover:bg-opacity-100 transition-colors rounded-lg p-2">
+                            推荐书法练习方法
+                        </button>
+                        <button class="w-full text-left text-xs bg-white bg-opacity-70 hover:bg-opacity-100 transition-colors rounded-lg p-2">
+                            生成今日日程安排
+                        </button>
+                        <button class="w-full text-left text-xs bg-white bg-opacity-70 hover:bg-opacity-100 transition-colors rounded-lg p-2">
+                            查找附近的书法展览
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近动态 -->
+            <div class="p-4">
+                <h4 class="text-xs font-medium text-ink-medium uppercase tracking-wider mb-3">最近动态</h4>
+                <div class="space-y-3">
+                    <div class="flex items-start space-x-2">
+                        <div class="avatar-frame w-8 h-8 mt-1 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                        </div>
+                        <div>
+                            <p class="text-xs text-ink-dark">颜真卿 发布了新动态</p>
+                            <p class="text-xs text-ink-medium mt-1">参观了故宫博物院的书法展览...</p>
+                            <span class="text-xs text-ink-medium mt-1 block">1小时前</span>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-2">
+                        <div class="avatar-frame w-8 h-8 mt-1 flex-shrink-0">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                        </div>
+                        <div>
+                            <p class="text-xs text-ink-dark">柳公权 评论了你的动态</p>
+                            <p class="text-xs text-ink-medium mt-1">笔法很有韵味，继续加油！</p>
+                            <span class="text-xs text-ink-medium mt-1 block">2小时前</span>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-2">
+                        <div class="w-8 h-8 mt-1 flex-shrink-0 rounded-full bg-primary bg-opacity-20 flex items-center justify-center">
+                            <i class="fa fa-calendar text-primary"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs text-ink-dark">书法研究小组 会议提醒</p>
+                            <p class="text-xs text-ink-medium mt-1">明天 14:00 线上会议</p>
+                            <span class="text-xs text-ink-medium mt-1 block">明天</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 移动端底部导航 -->
+    <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white bg-opacity-90 backdrop-blur-sm border-t border-gray-100 flex justify-around items-center h-16 z-20">
+        <button class="flex flex-col items-center justify-center text-primary" data-target="chat-section">
+            <i class="fa fa-comment-o text-lg"></i>
+            <span class="text-xs mt-1">消息</span>
+        </button>
+        <button class="flex flex-col items-center justify-center text-ink-medium" data-target="contacts-section">
+            <i class="fa fa-address-book-o text-lg"></i>
+            <span class="text-xs mt-1">联系人</span>
+        </button>
+        <button class="flex flex-col items-center justify-center text-ink-medium" data-target="moments-section">
+            <i class="fa fa-compass text-lg"></i>
+            <span class="text-xs mt-1">动态</span>
+        </button>
+        <button class="flex flex-col items-center justify-center text-ink-medium" data-target="files-section">
+            <i class="fa fa-folder-o text-lg"></i>
+            <span class="text-xs mt-1">文件</span>
+        </button>
+        <button class="flex flex-col items-center justify-center text-ink-medium">
+            <i class="fa fa-user-o text-lg"></i>
+            <span class="text-xs mt-1">我的</span>
+        </button>
+    </div>
+
+    
+<script>
+        const DB = {
+            users: JSON.parse(localStorage.getItem('mojing_users')) || [],
+            friends: JSON.parse(localStorage.getItem('mojing_friends')) || [],
+            currentUser: JSON.parse(localStorage.getItem('mojing_current_user')) || null
+        };
+        function saveDB() {
+            localStorage.setItem('mojing_users', JSON.stringify(DB.users));
+            localStorage.setItem('mojing_friends', JSON.stringify(DB.friends));
+            localStorage.setItem('mojing_current_user', JSON.stringify(DB.currentUser));
+        }
+
+        let PLACEHOLDER_AVATAR = '';
+        let currentChat = { name: '王羲之', avatar: '', isAI: false };
+        let threeInited = false;
+        let uiBound = false;
+
+        function initThreeScene() {
+            if (threeInited) return;
+            const container = document.getElementById('scene-container');
+            if (!container || typeof THREE === 'undefined') return;
+            threeInited = true;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            const renderer = new THREE.WebGLRenderer({ alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+            container.appendChild(renderer.domElement);
+            const particlesGeometry = new THREE.BufferGeometry();
+            const particlesCount = 1000;
+            const posArray = new Float32Array(particlesCount * 3);
+            for (let i = 0; i < particlesCount * 3; i++) posArray[i] = (Math.random() - 0.5) * 10;
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particlesMaterial = new THREE.PointsMaterial({ size: 0.02, color: 0x000000, transparent: true, opacity: 0.3 });
+            const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+            scene.add(particlesMesh);
+            function animate() {
+                requestAnimationFrame(animate);
+                particlesMesh.rotation.x += 0.0005;
+                particlesMesh.rotation.y += 0.0005;
+                renderer.render(scene, camera);
+            }
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            animate();
+        }
+
+        function showAuthFlow() {
+            const startup = document.getElementById('startup-screen');
+            const auth = document.getElementById('auth-screen');
+            if (!startup) { if (auth) auth.classList.remove('hidden'); return; }
+            setTimeout(() => {
+                startup.classList.add('fade-out');
+                setTimeout(() => {
+                    startup.remove();
+                    if (auth) auth.classList.remove('hidden');
+                }, 700);
+            }, 1600);
+        }
+
+        function enterMainApp() {
+            const startup = document.getElementById('startup-screen');
+            const auth = document.getElementById('auth-screen');
+            if (startup) startup.remove();
+            if (auth) auth.classList.add('hidden');
+            const main = document.getElementById('main-app');
+            if (main) main.classList.remove('hidden');
+            initThreeScene();
+            initAfterLogin();
+            bindAppUI();
+        }
+
+        function bindAuthUI() {
+            const goReg = document.getElementById('go-register');
+            const backLogin = document.getElementById('back-login');
+            if (goReg) goReg.onclick = () => {
+                document.querySelector('#auth-screen > div').classList.add('hidden');
+                document.getElementById('register-panel').classList.remove('hidden');
+            };
+            if (backLogin) backLogin.onclick = () => {
+                document.getElementById('register-panel').classList.add('hidden');
+                document.querySelector('#auth-screen > div').classList.remove('hidden');
+            };
+            const regBtn = document.getElementById('register-btn');
+            if (regBtn) regBtn.onclick = () => {
+                const account = document.getElementById('reg-account').value.trim();
+                const pwd = document.getElementById('reg-pwd').value.trim();
+                if (!account || !pwd) return alert('请填写完整信息');
+                if (DB.users.some(u => u.account === account)) return alert('账号已存在');
+                DB.users.push({ account, pwd, avatar: PLACEHOLDER_AVATAR });
+                saveDB();
+                alert('注册成功！请登录');
+                document.getElementById('back-login').click();
+                document.getElementById('login-account').value = account;
+            };
+            const loginBtn = document.getElementById('login-btn');
+            if (loginBtn) loginBtn.onclick = () => {
+                const account = document.getElementById('login-account').value.trim();
+                const pwd = document.getElementById('login-pwd').value.trim();
+                const user = DB.users.find(u => u.account === account && u.pwd === pwd);
+                if (!user) return alert('账号或密码错误');
+                DB.currentUser = user;
+                saveDB();
+                enterMainApp();
+            };
+            ['login-account', 'login-pwd'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') document.getElementById('login-btn').click();
+                });
+            });
+        }
+
+        function initAfterLogin() {
+            if (!DB.currentUser) return;
+            const nameEl = document.getElementById('sidebar-username');
+            if (nameEl) nameEl.innerText = DB.currentUser.account;
+            const img = document.getElementById('user-avatar-img');
+            if (img && DB.currentUser.avatar) img.src = DB.currentUser.avatar;
+            renderFriendList();
+            initChatSystem();
+        }
+
+        function bindFriendSearch() {
+            const btn = document.getElementById('search-friend-btn');
+            if (!btn || btn.dataset.bound === '1') return;
+            btn.dataset.bound = '1';
+            btn.onclick = () => {
+                const targetAccount = document.getElementById('search-friend-input').value.trim();
+                if (!targetAccount) return alert('请输入账号');
+                if (!DB.currentUser) return alert('请先登录');
+                if (targetAccount === DB.currentUser.account) return alert('不能添加自己为好友');
+                const targetUser = DB.users.find(u => u.account === targetAccount);
+                if (!targetUser) return alert('该用户不存在（请先用另一账号注册）');
+                const isAlreadyFriend = DB.friends.some(f =>
+                    (f.from === DB.currentUser.account && f.to === targetAccount) ||
+                    (f.from === targetAccount && f.to === DB.currentUser.account)
+                );
+                if (isAlreadyFriend) return alert('你们已经是好友了');
+                DB.friends.push({ from: DB.currentUser.account, to: targetAccount });
+                saveDB();
+                alert('添加好友成功！');
+                renderFriendList();
+            };
+        }
+
+        function renderFriendList() {
+            const friendListEl = document.getElementById('user-friend-list');
+            if (!friendListEl || !DB.currentUser) return;
+            friendListEl.innerHTML = '';
+            const myFriends = DB.friends.filter(f =>
+                f.from === DB.currentUser.account || f.to === DB.currentUser.account
+            );
+            if (myFriends.length === 0) {
+                friendListEl.innerHTML = '<li class="px-4 py-3 text-xs text-ink-medium">暂无好友，请在侧栏搜索账号添加</li>';
+                return;
+            }
+            myFriends.forEach(rel => {
+                const friendAccount = rel.from === DB.currentUser.account ? rel.to : rel.from;
+                const friend = DB.users.find(u => u.account === friendAccount);
+                const avatar = (friend && friend.avatar) || PLACEHOLDER_AVATAR;
+                const li = document.createElement('li');
+                li.className = 'px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer';
+                li.innerHTML = `
+                    <div class="avatar-frame status-online w-10 h-10 mr-3">
+                        <img src="${avatar}" alt="好友头像" class="w-full h-full object-cover">
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-medium text-ink-dark">${friendAccount}</h3>
+                        <p class="text-xs text-ink-medium truncate">在线</p>
+                    </div>`;
+                li.onclick = () => switchToChat(friendAccount, avatar, false);
+                friendListEl.appendChild(li);
+            });
+        }
+
+        function switchToChat(name, avatar, isAI) {
+            currentChat = { name, avatar: avatar || PLACEHOLDER_AVATAR, isAI: !!isAI || name === '电子宠物小月啼' };
+            const n = document.getElementById('chat-contact-name');
+            const s = document.getElementById('chat-contact-status');
+            if (n) n.innerText = name;
+            if (s) s.innerText = currentChat.isAI ? 'AI助手在线' : '在线';
+            const msg = document.getElementById('chat-messages');
+            const now = new Date();
+            const t = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            if (msg) {
+                msg.innerHTML = `<div class="flex justify-center"><span class="bg-gray-100 text-ink-medium text-xs px-3 py-1 rounded-full">今天 ${t}</span></div>`;
+                if (currentChat.isAI) {
+                    msg.insertAdjacentHTML('beforeend', `
+                        <div class="flex items-end space-x-2 animate-fade-in">
+                            <div class="avatar-frame w-8 h-8 flex-shrink-0 bg-gradient-to-br from-primary to-purple-500">
+                                <i class="fa fa-robot text-white text-lg flex items-center justify-center w-full h-full"></i>
+                            </div>
+                            <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
+                                <p>你好呀～我是电子宠物小月啼。聊聊书法、山水，或随便问问墨境的用法吧。</p>
+                            </div>
+                        </div>`);
+                }
+            }
+            const chatMenu = document.querySelector('.menu-item[data-target="chat-section"]');
+            if (chatMenu) chatMenu.click();
+        }
+
+        async function sendMessageToAI(message) {
+            await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
+            const m = message.toLowerCase();
+            const tips = [
+                '墨分五色，心静则笔稳。你可以在「艺术聊天室」里找灵感。',
+                '若想加好友：先注册第二个账号，再在侧栏搜索对方账号即可。',
+                '「动态」里可以刷水墨朋友圈，「文件」可管理墨宝草稿。',
+                '主题切换在左下角月亮图标，暗夜读帖更护眼。',
+                '智慧协作空间适合一起改稿；社交游戏厅放松一下也不错。'
+            ];
+            if (/你好|嗨|hello|hi/.test(m)) return '你好！我是小月啼，墨境里的电子宠物助手～';
+            if (/好友|加友|添加/.test(m)) return '侧栏输入对方账号 →「搜索并添加好友」。对方需先注册账号哦。';
+            if (/书法|王羲之|兰亭/.test(m)) return '王羲之《兰亭集序》被誉为天下第一行书。试试在消息里与「王羲之」演示对话吧。';
+            if (/天气|时间|几点/.test(m)) return `此刻本地时间是 ${new Date().toLocaleString('zh-CN')}。窗外墨色如何，你说了算。`;
+            if (/退出|注销|登出/.test(m)) return '点击侧栏右上角退出图标即可注销当前会话。';
+            if (/帮助|怎么用|功能/.test(m)) return tips.join('\\n');
+            return tips[Math.floor(Math.random() * tips.length)] + `\\n（已收到：${message.slice(0, 40)}${message.length > 40 ? '…' : ''}）`;
+        }
+
+        function initChatSystem() {
+            const sendBtn = document.getElementById('send-button');
+            const input = document.getElementById('message-input');
+            const msgArea = document.getElementById('chat-messages');
+            if (!sendBtn || !input || !msgArea) return;
+            if (sendBtn.dataset.bound === '1') return;
+            sendBtn.dataset.bound = '1';
+
+            function send() {
+                const text = input.value.trim();
+                if (!text || !currentChat) return;
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                msgArea.insertAdjacentHTML('beforeend', `
+                    <div class="flex items-end justify-end space-x-2 animate-fade-in">
+                        <span class="text-xs text-ink-medium">${timeStr}</span>
+                        <div class="chat-bubble-right bg-primary bg-opacity-80 text-white p-3 max-w-xs md:max-w-md"><p></p></div>
+                    </div>`);
+                msgArea.lastElementChild.querySelector('p').textContent = text;
+                input.value = '';
+                msgArea.scrollTop = msgArea.scrollHeight;
+
+                if (currentChat.isAI) {
+                    const status = document.getElementById('chat-contact-status');
+                    if (status) status.innerText = '正在输入...';
+                    sendMessageToAI(text).then(reply => {
+                        msgArea.insertAdjacentHTML('beforeend', `
+                            <div class="flex items-end space-x-2 animate-fade-in">
+                                <div class="avatar-frame w-8 h-8 flex-shrink-0 bg-gradient-to-br from-primary to-purple-500">
+                                    <i class="fa fa-robot text-white text-lg flex items-center justify-center w-full h-full"></i>
+                                </div>
+                                <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md"><p></p></div>
+                                <span class="text-xs text-ink-medium">${timeStr}</span>
+                            </div>`);
+                        msgArea.lastElementChild.querySelector('p').textContent = reply;
+                        msgArea.scrollTop = msgArea.scrollHeight;
+                        if (status) status.innerText = 'AI助手在线';
+                    });
+                } else {
+                    setTimeout(() => {
+                        const replies = currentChat.name === '王羲之'
+                            ? ['笔墨当随时代。', '且看这一捺，如千里阵云。', '很有见地！', '可与君共论兰亭。', '此言甚妙。']
+                            : ['收到消息啦～', '嗯嗯，我在。', '稍后再聊细节？', '好的！', '哈哈哈'];
+                        const randomReply = replies[Math.floor(Math.random() * replies.length)];
+                        msgArea.insertAdjacentHTML('beforeend', `
+                            <div class="flex items-end space-x-2 animate-fade-in">
+                                <div class="avatar-frame w-8 h-8 flex-shrink-0">
+                                    <img src="${currentChat.avatar || PLACEHOLDER_AVATAR}" alt="联系人头像" class="w-full h-full object-cover">
+                                </div>
+                                <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md"><p>${randomReply}</p></div>
+                                <span class="text-xs text-ink-medium">${timeStr}</span>
+                            </div>`);
+                        msgArea.scrollTop = msgArea.scrollHeight;
+                    }, 800);
+                }
+            }
+            sendBtn.onclick = send;
+            input.onkeydown = e => { if (e.key === 'Enter') send(); };
+
+            const ai = document.getElementById('ai-assistant');
+            if (ai) ai.onclick = () => switchToChat('电子宠物小月啼', '', true);
+            document.querySelectorAll('.demo-contact').forEach(el => {
+                el.onclick = () => switchToChat(el.getAttribute('data-contact-name') || '王羲之', PLACEHOLDER_AVATAR, false);
+            });
+        }
+
+        function bindAppUI() {
+            if (uiBound) return;
+            uiBound = true;
+            const menuItems = document.querySelectorAll('.menu-item, .lg\\:hidden button');
+            const sections = document.querySelectorAll('main > section');
+            menuItems.forEach(item => {
+                item.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const target = this.getAttribute('data-target');
+                    if (!target) return;
+                    menuItems.forEach(mi => mi.classList.remove('active', 'text-primary'));
+                    menuItems.forEach(mi => {
+                        if (mi.getAttribute('data-target') === target) mi.classList.add('active');
+                    });
+                    sections.forEach(section => {
+                        if (section.id === target) section.classList.remove('hidden');
+                        else section.classList.add('hidden');
+                    });
+                });
+            });
+
+            const themeToggle = document.getElementById('theme-toggle');
+            if (themeToggle) {
+                themeToggle.addEventListener('click', function () {
+                    document.body.classList.toggle('bg-dark');
+                    document.body.classList.toggle('text-white');
+                    const icon = themeToggle.querySelector('i');
+                    if (icon.classList.contains('fa-moon-o')) {
+                        icon.classList.remove('fa-moon-o');
+                        icon.classList.add('fa-sun-o');
+                    } else {
+                        icon.classList.remove('fa-sun-o');
+                        icon.classList.add('fa-moon-o');
+                    }
+                    document.querySelectorAll('.ink-card').forEach(card => card.classList.toggle('ink-card-dark'));
+                });
+            }
+
+            document.addEventListener('click', function (e) {
+                const main = document.getElementById('main-app');
+                if (!main || main.classList.contains('hidden')) return;
+                const splash = document.createElement('div');
+                splash.classList.add('ink-splash');
+                const size = Math.max(window.innerWidth, window.innerHeight) * 0.5;
+                splash.style.width = size + 'px';
+                splash.style.height = size + 'px';
+                splash.style.left = (e.clientX - size / 2) + 'px';
+                splash.style.top = (e.clientY - size / 2) + 'px';
+                splash.style.backgroundColor = 'rgba(30, 136, 229, ' + (Math.random() * 0.2 + 0.1) + ')';
+                document.body.appendChild(splash);
+                setTimeout(() => splash.remove(), 600);
+            });
+
+            const avatar = document.getElementById('user-avatar');
+            const avatarInput = document.getElementById('avatar-input');
+            if (avatar && avatarInput) {
+                avatar.onclick = () => avatarInput.click();
+                avatarInput.onchange = () => {
+                    const file = avatarInput.files && avatarInput.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const url = reader.result;
+                        const img = document.getElementById('user-avatar-img');
+                        if (img) img.src = url;
+                        if (DB.currentUser) {
+                            DB.currentUser.avatar = url;
+                            const u = DB.users.find(x => x.account === DB.currentUser.account);
+                            if (u) u.avatar = url;
+                            saveDB();
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                };
+            }
+
+            const logout = document.getElementById('logout-btn');
+            if (logout) logout.onclick = () => {
+                if (!confirm('确定退出登录？')) return;
+                DB.currentUser = null;
+                saveDB();
+                location.reload();
+            };
+            bindFriendSearch();
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const img = document.getElementById('user-avatar-img');
+            PLACEHOLDER_AVATAR = img ? img.getAttribute('src') : '';
+            currentChat.avatar = PLACEHOLDER_AVATAR;
+            bindAuthUI();
+            if (DB.currentUser) enterMainApp();
+            else showAuthFlow();
+        });
+    </script>
+</body>
+</html>
