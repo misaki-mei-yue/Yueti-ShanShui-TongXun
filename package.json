@@ -1,6 +1,6 @@
 {
   "name": "yueti-shanshui-tongxun",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "月啼山水通讯：东方水墨美学通讯桌面应用",
   "author": "MEI",
   "main": "main.js",
@@ -17,8 +17,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.mei.mojing",
-    "productName": "墨境",
+    "appId": "com.mei.yueti.shanshui",
+    "productName": "月啼山水通讯",
     "copyright": "Copyright MEI",
     "directories": {
       "output": "dist",
@@ -28,28 +28,38 @@
       "main.js",
       "index.html",
       "package.json",
-      "build/icon.png"
+      "build/icon.png",
+      "assets/**"
     ],
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ],
       "icon": "build/icon.png",
-      "artifactName": "Mojing-${version}-portable.${ext}"
+      "artifactName": "YuetiShanShui-${version}-Setup.${ext}"
     },
     "portable": {
-      "artifactName": "Mojing-${version}-portable.${ext}"
+      "artifactName": "YuetiShanShui-${version}-portable.${ext}"
     },
     "nsis": {
-      "oneClick": true,
-      "artifactName": "Mojing-${version}-Setup.${ext}",
-      "shortcutName": "墨境",
-      "uninstallDisplayName": "墨境"
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "月啼山水通讯",
+      "uninstallDisplayName": "月啼山水通讯",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
+      "language": "2052",
+      "artifactName": "YuetiShanShui-${version}-Setup.${ext}"
     },
     "linux": {
       "target": [

@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>墨境 - 东方美学通讯应用</title>
+    <title>月啼山水通讯</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome -->
@@ -263,11 +266,123 @@
                 left: 0;
                 width: 100%;
                 height: 100%;
-                z-index: -1;
-                opacity: 0.2;
+                z-index: 0;
+                opacity: 0.22;
+                pointer-events: none;
+            }
+            .auth-ink-input {
+                width: 100%;
+                background: rgba(255, 255, 255, 0.55);
+                border: 1px solid rgba(0, 0, 0, 0.1);
+                border-radius: 0.75rem;
+                padding: 0.85rem 1rem;
+                margin-bottom: 0.85rem;
+                font-family: "Noto Serif SC", serif;
+                transition: box-shadow 0.2s, border-color 0.2s, background 0.2s;
+            }
+            .auth-ink-input::placeholder {
+                color: rgba(102, 102, 102, 0.7);
+            }
+            .auth-ink-input:focus {
+                outline: none;
+                border-color: rgba(30, 136, 229, 0.35);
+                box-shadow: 0 0 0 3px rgba(30, 136, 229, 0.15);
+                background: rgba(255, 255, 255, 0.75);
+            }
+            .ink-wash-blob {
+                position: absolute;
+                border-radius: 50%;
+                filter: blur(40px);
+                pointer-events: none;
             }
         }
     
+
+            /* 原创青绿山水 splash + auth base plate */
+            .qianli-stage {
+                position: absolute;
+                inset: 0;
+                overflow: hidden;
+                background-color: #1a2f2a;
+            }
+            .qianli-pan {
+                position: absolute;
+                top: -4%;
+                left: -8%;
+                width: 116%;
+                height: 108%;
+                background-image: url('assets/auth-login-bottom.jpg');
+                background-size: cover;
+                background-position: center 35%;
+                background-repeat: no-repeat;
+                transform-origin: center center;
+                will-change: transform;
+                animation: qianliKenBurns 56s ease-in-out infinite alternate;
+            }
+            @keyframes qianliKenBurns {
+                0%   { transform: scale(1.08) translate3d(0, 0, 0); }
+                50%  { transform: scale(1.1) translate3d(-3.5%, 0.5%, 0); }
+                100% { transform: scale(1.12) translate3d(-7%, 0, 0); }
+            }
+            .qianli-mist {
+                position: absolute;
+                inset: 0;
+                pointer-events: none;
+                background:
+                    linear-gradient(180deg,
+                        rgba(245, 245, 245, 0.55) 0%,
+                        rgba(245, 245, 245, 0.18) 28%,
+                        transparent 48%,
+                        transparent 62%,
+                        rgba(245, 245, 245, 0.35) 100%),
+                    radial-gradient(ellipse 65% 50% at 50% 42%,
+                        transparent 40%,
+                        rgba(0, 0, 0, 0.12) 100%);
+            }
+            /* 主界面同款「墨镜」：墨晕圆斑装饰 */
+            .ink-mirror {
+                position: absolute;
+                width: min(42vw, 280px);
+                height: min(42vw, 280px);
+                top: 8%;
+                left: 6%;
+                border-radius: 50%;
+                background-image: url('assets/ink-texture-src.jpg');
+                background-size: 220% 220%;
+                background-position: 8% 12%;
+                opacity: 0.28;
+                filter: contrast(1.05) grayscale(0.15);
+                pointer-events: none;
+                mix-blend-mode: multiply;
+            }
+            .qianli-caption {
+                position: absolute;
+                right: 1rem;
+                bottom: 0.75rem;
+                z-index: 20;
+                font-family: "Noto Serif SC", serif;
+                font-size: 0.65rem;
+                letter-spacing: 0.12em;
+                color: rgba(255, 255, 255, 0.55);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+                pointer-events: none;
+                user-select: none;
+            }
+            #startup-screen .startup-title-plate {
+                text-shadow:
+                    0 1px 2px rgba(252, 246, 232, 0.85),
+                    0 0 24px rgba(252, 246, 232, 0.55),
+                    0 2px 8px rgba(0, 0, 0, 0.15);
+            }
+            #auth-screen .ink-card {
+                background-color: rgba(255, 255, 255, 0.85);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border-radius: 12px;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            }
+
             .fade-out {
                 opacity: 0;
                 transition: opacity 0.7s ease;
@@ -278,49 +393,67 @@
 <body class="bg-ink-light text-ink-dark min-h-screen font-sans antialiased">
 
 <!-- =============================================
-     启动界面（QQ风格）
+     启动界面（水墨山水）
 ============================================= -->
-<div id="startup-screen" class="fixed inset-0 bg-white flex flex-col items-center justify-center z-50 animate-fade-in">
-    <div class="w-28 h-28 rounded-2xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center mb-6 shadow-lg">
-        <i class="fa fa-paint-brush text-white text-5xl"></i>
+<div id="startup-screen" class="fixed inset-0 z-50 flex flex-col items-center justify-center animate-fade-in overflow-hidden">
+    <div class="qianli-stage" aria-hidden="true">
+        <div class="qianli-pan"></div>
     </div>
-    <h1 class="text-3xl font-bold text-ink-dark">墨境</h1>
-    <p class="text-ink-medium mt-2">东方美学 · 智能通讯</p>
+    <div class="qianli-mist" aria-hidden="true"></div>
+    <div class="ink-mirror" aria-hidden="true"></div>
+    <div class="relative z-10 text-center px-8 startup-title-plate">
+        <p class="font-serif text-sm tracking-[0.35em] text-ink-dark/75 mb-6">墨韵初开</p>
+        <h1 class="font-serif text-4xl md:text-5xl font-semibold tracking-[0.2em] text-ink-dark">月啼山水通讯</h1>
+        <div class="mx-auto mt-6 mb-6 w-16 h-px bg-gradient-to-r from-transparent via-ink-dark/40 to-transparent"></div>
+        <p class="font-serif text-base tracking-[0.25em] text-ink-dark/80">山水入墨 · 心声相通</p>
+    </div>
+    <p class="qianli-caption">水墨山水</p>
 </div>
 
 <!-- =============================================
-     登录 / 注册 界面
+     登录 / 注册 界面（水墨玻璃卡）
 ============================================= -->
-<div id="auth-screen" class="hidden fixed inset-0 bg-white z-40">
-    <div class="max-w-sm mx-auto px-6 pt-24">
-        <h1 class="text-2xl font-bold text-center mb-8">账号登录</h1>
-        
-        <input id="login-account" placeholder="请输入账号" 
-            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-primary">
-        
-        <input id="login-pwd" type="password" placeholder="请输入密码" 
-            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-primary">
-        
-        <button id="login-btn" 
-            class="w-full bg-primary text-white py-3 rounded-lg mb-3 ink-button">登录</button>
-        
-        <button id="go-register" class="w-full text-primary text-center">没有账号？立即注册</button>
+<div id="auth-screen" class="hidden fixed inset-0 z-40 overflow-hidden">
+    <div class="qianli-stage" aria-hidden="true">
+        <div class="qianli-pan"></div>
     </div>
+    <div class="qianli-mist" aria-hidden="true"></div>
+    <div class="ink-mirror" aria-hidden="true"></div>
 
-    <div id="register-panel" class="hidden max-w-sm mx-auto px-6 pt-20">
-        <h1 class="text-2xl font-bold text-center mb-8">注册账号</h1>
-        
-        <input id="reg-account" placeholder="设置账号" 
-            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-primary">
-        
-        <input id="reg-pwd" type="password" placeholder="设置密码" 
-            class="w-full border border-gray-200 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-primary">
-        
-        <button id="register-btn" 
-            class="w-full bg-primary text-white py-3 rounded-lg mb-3 ink-button">注册</button>
-        
-        <button id="back-login" class="w-full text-primary text-center">返回登录</button>
+    <div class="relative z-10 min-h-full flex flex-col items-center justify-center px-4 py-10">
+        <div id="login-panel" class="ink-card w-full max-w-md p-8 md:p-10 animate-fade-in">
+            <div class="text-center mb-8">
+                <h1 class="font-serif text-2xl md:text-3xl font-semibold tracking-[0.15em] text-ink-dark">月啼山水通讯</h1>
+                <p class="font-serif text-sm text-ink-medium mt-3 tracking-widest">山水入墨 · 心声相通</p>
+                <p class="text-xs text-ink-medium/80 mt-4">账号登录</p>
+            </div>
+
+            <input id="login-account" placeholder="请输入账号（雅号）" class="auth-ink-input">
+            <input id="login-pwd" type="password" placeholder="请输入密码" class="auth-ink-input mb-5">
+
+            <button id="login-btn"
+                class="w-full bg-primary hover:bg-blue-600 text-white py-3 rounded-xl mb-4 ink-button font-serif tracking-widest shadow-sm">登　录</button>
+
+            <button id="go-register" class="w-full text-primary/90 hover:text-primary text-center font-serif text-sm tracking-wide transition-colors">尚未入墨？立即注册</button>
+        </div>
+
+        <div id="register-panel" class="hidden ink-card w-full max-w-md p-8 md:p-10 animate-fade-in">
+            <div class="text-center mb-8">
+                <h1 class="font-serif text-2xl md:text-3xl font-semibold tracking-[0.15em] text-ink-dark">月啼山水通讯</h1>
+                <p class="font-serif text-sm text-ink-medium mt-3 tracking-widest">落笔成名 · 共赏山水</p>
+                <p class="text-xs text-ink-medium/80 mt-4">注册账号</p>
+            </div>
+
+            <input id="reg-account" placeholder="设置账号（雅号）" class="auth-ink-input">
+            <input id="reg-pwd" type="password" placeholder="设置密码" class="auth-ink-input mb-5">
+
+            <button id="register-btn"
+                class="w-full bg-primary hover:bg-blue-600 text-white py-3 rounded-xl mb-4 ink-button font-serif tracking-widest shadow-sm">注　册</button>
+
+            <button id="back-login" class="w-full text-primary/90 hover:text-primary text-center font-serif text-sm tracking-wide transition-colors">返回登录</button>
+        </div>
     </div>
+    <p class="qianli-caption">水墨山水</p>
 </div>
 
 
@@ -338,7 +471,7 @@
                     <input type="file" id="avatar-input" accept="image/*" class="hidden">
                 </div>
                 <div>
-                    <h3 id="sidebar-username" class="font-medium text-ink-dark">墨境用户</h3>
+                    <h3 id="sidebar-username" class="font-medium text-ink-dark">月啼山水通讯</h3>
                     <p class="text-xs text-ink-medium">在线</p>
                 </div>
                 <button id="logout-btn" title="退出登录" class="ml-auto text-ink-medium hover:text-primary transition-colors">
@@ -1594,6 +1727,14 @@
         }
 
         function showAuthFlow() {
+            try { initThreeScene(); } catch (e) {}
+            if (new URLSearchParams(location.search).has('auth')) {
+                const startup = document.getElementById('startup-screen');
+                const auth = document.getElementById('auth-screen');
+                if (startup) startup.remove();
+                if (auth) auth.classList.remove('hidden');
+                return;
+            }
             const startup = document.getElementById('startup-screen');
             const auth = document.getElementById('auth-screen');
             if (!startup) { if (auth) auth.classList.remove('hidden'); return; }
@@ -1622,12 +1763,12 @@
             const goReg = document.getElementById('go-register');
             const backLogin = document.getElementById('back-login');
             if (goReg) goReg.onclick = () => {
-                document.querySelector('#auth-screen > div').classList.add('hidden');
+                document.getElementById('login-panel').classList.add('hidden');
                 document.getElementById('register-panel').classList.remove('hidden');
             };
             if (backLogin) backLogin.onclick = () => {
                 document.getElementById('register-panel').classList.add('hidden');
-                document.querySelector('#auth-screen > div').classList.remove('hidden');
+                document.getElementById('login-panel').classList.remove('hidden');
             };
             const regBtn = document.getElementById('register-btn');
             if (regBtn) regBtn.onclick = () => {
@@ -1740,7 +1881,7 @@
                                 <i class="fa fa-robot text-white text-lg flex items-center justify-center w-full h-full"></i>
                             </div>
                             <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
-                                <p>你好呀～我是电子宠物小月啼。聊聊书法、山水，或随便问问墨境的用法吧。</p>
+                                <p>你好呀～我是电子宠物小月啼。聊聊书法、山水，或随便问问月啼山水通讯的用法吧。</p>
                             </div>
                         </div>`);
                 }
@@ -1759,7 +1900,7 @@
                 '主题切换在左下角月亮图标，暗夜读帖更护眼。',
                 '智慧协作空间适合一起改稿；社交游戏厅放松一下也不错。'
             ];
-            if (/你好|嗨|hello|hi/.test(m)) return '你好！我是小月啼，墨境里的电子宠物助手～';
+            if (/你好|嗨|hello|hi/.test(m)) return '你好！我是小月啼，月啼山水通讯里的电子宠物助手～';
             if (/好友|加友|添加/.test(m)) return '侧栏输入对方账号 →「搜索并添加好友」。对方需先注册账号哦。';
             if (/书法|王羲之|兰亭/.test(m)) return '王羲之《兰亭集序》被誉为天下第一行书。试试在消息里与「王羲之」演示对话吧。';
             if (/天气|时间|几点/.test(m)) return `此刻本地时间是 ${new Date().toLocaleString('zh-CN')}。窗外墨色如何，你说了算。`;
