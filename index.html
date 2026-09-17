@@ -467,11 +467,11 @@
             <!-- 用户信息 -->
             <div class="p-4 border-b border-gray-100 flex items-center space-x-3">
                 <div class="avatar-frame status-online w-12 h-12 cursor-pointer hover:opacity-80 transition-opacity" id="user-avatar">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover" id="user-avatar-img">
+                    <img src="assets/avatars/user.png" alt="用户头像" class="w-full h-full object-cover" id="user-avatar-img">
                     <input type="file" id="avatar-input" accept="image/*" class="hidden">
                 </div>
                 <div>
-                    <h3 id="sidebar-username" class="font-medium text-ink-dark">月啼山水通讯</h3>
+                    <h3 id="sidebar-username" class="font-medium text-ink-dark">月啼山水通讯用户</h3>
                     <p class="text-xs text-ink-medium">在线</p>
                 </div>
                 <button id="logout-btn" title="退出登录" class="ml-auto text-ink-medium hover:text-primary transition-colors">
@@ -492,26 +492,26 @@
                 <ul class="space-y-1">
                     <li>
                         <a href="#" class="menu-item active flex items-center p-3 rounded-lg" data-target="chat-section">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="消息" class="w-6 h-6 mr-3">
+                            <img src="assets/icons/nav-chat.png" alt="消息" class="w-6 h-6 mr-3">
                             <span>消息</span>
                             <span class="ml-auto bg-secondary text-white text-xs px-2 py-0.5 rounded-full">3</span>
                         </a>
                     </li>
                     <li>
                         <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="contacts-section">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="联系人" class="w-6 h-6 mr-3">
+                            <img src="assets/icons/nav-contacts.png" alt="联系人" class="w-6 h-6 mr-3">
                             <span>联系人</span>
                         </a>
                     </li>
                     <li>
                         <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="moments-section">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="动态" class="w-6 h-6 mr-3">
+                            <img src="assets/icons/nav-moments.png" alt="动态" class="w-6 h-6 mr-3">
                             <span>动态</span>
                         </a>
                     </li>
                     <li>
                         <a href="#" class="menu-item flex items-center p-3 rounded-lg" data-target="files-section">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%231E88E5' fill-opacity='0.15'/%3E%3Cpath d='M12 30c6-14 18-14 24 0' stroke='%231E88E5' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='24' cy='18' r='4' fill='%231E88E5'/%3E%3C/svg%3E" alt="文件" class="w-6 h-6 mr-3">
+                            <img src="assets/icons/nav-files.png" alt="文件" class="w-6 h-6 mr-3">
                             <span>文件</span>
                         </a>
                     </li>
@@ -564,7 +564,7 @@
                 <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-b border-gray-100 shadow-sm flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                         <div class="avatar-frame status-online w-10 h-10">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/wangxizhi.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div>
                             <h3 id="chat-contact-name" class="font-medium text-ink-dark">王羲之</h3>
@@ -594,7 +594,7 @@
                     <!-- 对方消息 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/wangxizhi.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
                             <p>你好，最近在研究什么书法？</p>
@@ -613,7 +613,7 @@
                     <!-- 对方消息 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/user.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
                             <p>巧了，我也在研究《兰亭序》！我发现王羲之的笔法变化多端，尤其是在"之"字的处理上，每个都不同。</p>
@@ -624,10 +624,10 @@
                     <!-- 对方消息 - 图片 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/wangxizhi.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-2 max-w-xs md:max-w-md">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg max-w-full h-auto">
+                            <img src="assets/media/calligraphy-1.jpg" alt="书法作品" class="rounded-lg max-w-full h-auto">
                             <p class="text-xs mt-1">我临摹的《兰亭序》片段</p>
                         </div>
                         <span class="text-xs text-ink-medium">14:36</span>
@@ -645,7 +645,7 @@
                     <div class="flex items-end justify-end space-x-2">
                         <span class="text-xs text-ink-medium">14:39</span>
                         <div class="chat-bubble-right bg-primary bg-opacity-80 text-white p-2 max-w-xs md:max-w-md">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg max-w-full h-auto">
+                            <img src="assets/media/calligraphy-2.jpg" alt="书法作品" class="rounded-lg max-w-full h-auto">
                             <p class="text-xs mt-1">我的山水画练习</p>
                         </div>
                     </div>
@@ -653,7 +653,7 @@
                     <!-- 对方消息 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/wangxizhi.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-gray-100 bg-opacity-80 p-3 max-w-xs md:max-w-md">
                             <p>山水画也很有意境！我们可以交流一下技法。</p>
@@ -756,27 +756,27 @@
                             常用联系人
                         </div>
                         <ul>
-                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer demo-contact" data-contact-name="王羲之" data-contact-avatar="assets/avatars/wangxizhi.png">
                                 <div class="avatar-frame status-online w-10 h-10 mr-3">
-                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                    <img src="assets/avatars/yanzhenqing.png" alt="联系人头像" class="w-full h-full object-cover">
                                 </div>
                                 <div class="flex-1">
                                     <h3 class="font-medium text-ink-dark">王羲之</h3>
                                     <p class="text-xs text-ink-medium truncate">正在输入...</p>
                                 </div>
                             </li>
-                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer demo-contact" data-contact-name="颜真卿" data-contact-avatar="assets/avatars/yanzhenqing.png">
                                 <div class="avatar-frame status-away w-10 h-10 mr-3">
-                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                    <img src="assets/avatars/liugongquan.png" alt="联系人头像" class="w-full h-full object-cover">
                                 </div>
                                 <div class="flex-1">
                                     <h3 class="font-medium text-ink-dark">颜真卿</h3>
                                     <p class="text-xs text-ink-medium truncate">稍等，我在忙</p>
                                 </div>
                             </li>
-                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer demo-contact" data-contact-name="柳公权" data-contact-avatar="assets/avatars/liugongquan.png">
                                 <div class="avatar-frame status-busy w-10 h-10 mr-3">
-                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                    <img src="assets/avatars/ouyangxun.png" alt="联系人头像" class="w-full h-full object-cover">
                                 </div>
                                 <div class="flex-1">
                                     <h3 class="font-medium text-ink-dark">柳公权</h3>
@@ -791,9 +791,9 @@
                             A
                         </div>
                         <ul>
-                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer demo-contact" data-contact-name="欧阳询" data-contact-avatar="assets/avatars/ouyangxun.png">
                                 <div class="avatar-frame status-online w-10 h-10 mr-3">
-                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                    <img src="assets/avatars/sushi.png" alt="联系人头像" class="w-full h-full object-cover">
                                 </div>
                                 <div class="flex-1">
                                     <h3 class="font-medium text-ink-dark">欧阳询</h3>
@@ -808,9 +808,9 @@
                             S
                         </div>
                         <ul>
-                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer">
+                            <li class="px-4 py-3 flex items-center hover:bg-gray-50 cursor-pointer demo-contact" data-contact-name="苏轼" data-contact-avatar="assets/avatars/sushi.png">
                                 <div class="avatar-frame status-offline w-10 h-10 mr-3">
-                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                                    <img src="assets/avatars/xiaoyueti.png" alt="联系人头像" class="w-full h-full object-cover">
                                 </div>
                                 <div class="flex-1">
                                     <h3 class="font-medium text-ink-dark">苏轼</h3>
@@ -838,7 +838,7 @@
                     <div class="ink-card p-4">
                         <div class="flex items-center space-x-3 mb-3">
                             <div class="avatar-frame w-10 h-10">
-                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                <img src="assets/avatars/wangxizhi.png" alt="用户头像" class="w-full h-full object-cover">
                             </div>
                             <div>
                                 <h3 class="font-medium text-ink-dark">王羲之</h3>
@@ -852,8 +852,8 @@
                             <p class="text-ink-dark">今天练习了《兰亭序》，分享一下心得。笔法的变化要自然，尤其是在转折处，要注意笔锋的转换。</p>
                         </div>
                         <div class="grid grid-cols-2 gap-2 mb-3">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
+                            <img src="assets/media/landscape-1.jpg" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
+                            <img src="assets/media/calligraphy-3.jpg" alt="书法作品" class="rounded-lg w-full h-40 object-cover">
                         </div>
                         <div class="flex items-center justify-between text-ink-medium text-sm">
                             <button class="flex items-center space-x-1 hover:text-primary transition-colors">
@@ -875,7 +875,7 @@
                     <div class="ink-card p-4">
                         <div class="flex items-center space-x-3 mb-3">
                             <div class="avatar-frame w-10 h-10">
-                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                <img src="assets/avatars/yanzhenqing.png" alt="用户头像" class="w-full h-full object-cover">
                             </div>
                             <div>
                                 <h3 class="font-medium text-ink-dark">颜真卿</h3>
@@ -889,9 +889,9 @@
                             <p class="text-ink-dark">参观了故宫博物院的书法展览，看到了很多珍贵的碑帖真迹，收获很大！分享几张照片。</p>
                         </div>
                         <div class="grid grid-cols-3 gap-2 mb-3">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect width='400' height='300' fill='%23EDE8DF'/%3E%3Cpath d='M0 200 Q100 140 200 190 T400 170 L400 300 L0 300 Z' fill='%23444' fill-opacity='0.35'/%3E%3Ctext x='200' y='150' text-anchor='middle' font-size='18' fill='%23666' font-family='serif'%3E水墨留白%3C/text%3E%3C/svg%3E" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                            <img src="assets/media/exhibition-1.jpg" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                            <img src="assets/media/exhibition-2.jpg" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
+                            <img src="assets/media/exhibition-3.jpg" alt="展览照片" class="rounded-lg w-full h-32 object-cover">
                         </div>
                         <div class="flex items-center justify-between text-ink-medium text-sm">
                             <button class="flex items-center space-x-1 hover:text-primary transition-colors">
@@ -913,7 +913,7 @@
                     <div class="ink-card p-4">
                         <div class="flex items-center space-x-3 mb-3">
                             <div class="avatar-frame w-10 h-10">
-                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                <img src="assets/avatars/liugongquan.png" alt="用户头像" class="w-full h-full object-cover">
                             </div>
                             <div>
                                 <h3 class="font-medium text-ink-dark">柳公权</h3>
@@ -925,6 +925,9 @@
                         </div>
                         <div class="mb-3">
                             <p class="text-ink-dark">推荐一本好书《书法美学》，对理解书法艺术很有帮助。</p>
+                        </div>
+                        <div class="mb-3">
+                            <img src="assets/media/tea-1.jpg" alt="茶席" class="rounded-lg w-full h-40 object-cover">
                         </div>
                         <div class="bg-gray-50 rounded-lg p-3 mb-3 flex items-center space-x-3">
                             <div class="bg-primary bg-opacity-10 rounded-lg p-2">
@@ -1090,7 +1093,7 @@
                 </div>
 
                 <!-- 艺术聊天室内容区 -->
-                <div class="flex-1 overflow-y-auto p-4 space-y-4" style="background-image: url('data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23E8EEF5'/%3E%3Cstop offset='1' stop-color='%23F7F5F0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='500' fill='url(%23sky)'/%3E%3Cpath d='M0 340 Q120 260 220 320 T420 300 T650 340 T800 310 L800 500 L0 500 Z' fill='%23333' fill-opacity='0.55'/%3E%3Cpath d='M0 380 Q180 320 300 370 T560 350 T800 390 L800 500 L0 500 Z' fill='%23111' fill-opacity='0.45'/%3E%3Ccircle cx='620' cy='110' r='28' fill='%23fff' fill-opacity='0.7'/%3E%3C/svg%3E'); background-size: cover; background-position: center;">
+                <div class="flex-1 overflow-y-auto p-4 space-y-4" style="background-image: url('assets/ink-landscape-src.jpg'); background-size: cover; background-position: center;">
                     <!-- 日期分隔符 -->
                     <div class="flex justify-center">
                         <span class="bg-white bg-opacity-70 text-ink-medium text-xs px-3 py-1 rounded-full backdrop-blur-sm">今天 15:30</span>
@@ -1099,7 +1102,7 @@
                     <!-- 对方消息 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/guests1.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
                             <p>山水之间有真意，墨色浓淡总关情</p>
@@ -1110,10 +1113,10 @@
                     <!-- 对方消息 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/guests2.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect width='400' height='300' fill='%23EDE8DF'/%3E%3Cpath d='M0 200 Q100 140 200 190 T400 170 L400 300 L0 300 Z' fill='%23444' fill-opacity='0.35'/%3E%3Ctext x='200' y='150' text-anchor='middle' font-size='18' fill='%23666' font-family='serif'%3E水墨留白%3C/text%3E%3C/svg%3E" alt="水墨画" class="rounded-lg max-w-full h-auto">
+                            <img src="assets/media/ink-share.jpg" alt="水墨画" class="rounded-lg max-w-full h-auto">
                             <p class="text-xs mt-1">我画的水墨元素</p>
                         </div>
                         <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:32</span>
@@ -1130,14 +1133,14 @@
                     <!-- 对方消息 - 语音转书画 -->
                     <div class="flex items-end space-x-2">
                         <div class="avatar-frame w-8 h-8 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="联系人头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/wangxizhi.png" alt="联系人头像" class="w-full h-full object-cover">
                         </div>
                         <div class="chat-bubble-left bg-white bg-opacity-70 backdrop-blur-sm p-3 max-w-xs md:max-w-md border border-gray-200 border-opacity-50">
                             <div class="flex items-center space-x-2 mb-2">
                                 <i class="fa fa-microphone text-primary"></i>
                                 <span class="text-xs text-ink-medium">语音消息 · 5秒</span>
                             </div>
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="语音转书画" class="rounded-lg max-w-full h-auto">
+                            <img src="assets/media/voice-art.jpg" alt="语音转书画" class="rounded-lg max-w-full h-auto">
                             <p class="text-xs mt-1 text-ink-medium italic">语音转书画："青山绿水，鸟语花香"</p>
                         </div>
                         <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:35</span>
@@ -1147,7 +1150,7 @@
                     <div class="flex items-end justify-end space-x-2">
                         <span class="text-xs text-white bg-black bg-opacity-30 px-1 rounded">15:36</span>
                         <div class="chat-bubble-right bg-primary bg-opacity-70 backdrop-blur-sm text-white p-3 max-w-xs md:max-w-md border border-primary border-opacity-30">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="艺术表情" class="w-20 h-auto">
+                            <img src="assets/media/art-emoji.png" alt="艺术表情" class="w-20 h-auto">
                         </div>
                     </div>
 
@@ -1163,7 +1166,7 @@
                 <div class="bg-white bg-opacity-90 backdrop-blur-sm p-4 border-t border-gray-100 shadow-sm">
                     <div class="flex items-center space-x-3 mb-2">
                         <button class="text-ink-medium hover:text-primary transition-colors">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="表情" class="w-5 h-5">
+                            <img src="assets/icons/emoji.png" alt="表情" class="w-5 h-5">
                         </button>
                         <button class="text-ink-medium hover:text-primary transition-colors">
                             <i class="fa fa-paperclip"></i>
@@ -1315,31 +1318,31 @@
                             <div class="space-y-3 mb-6">
                                 <div class="flex items-center space-x-2">
                                     <div class="avatar-frame status-online w-8 h-8">
-                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                        <img src="assets/avatars/guests2.png" alt="用户头像" class="w-full h-full object-cover">
                                     </div>
                                     <span class="text-sm text-ink-dark">王羲之</span>
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <div class="avatar-frame status-online w-8 h-8">
-                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                        <img src="assets/avatars/yanzhenqing.png" alt="用户头像" class="w-full h-full object-cover">
                                     </div>
                                     <span class="text-sm text-ink-dark">颜真卿</span>
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <div class="avatar-frame status-online w-8 h-8">
-                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                        <img src="assets/avatars/ouyangxun.png" alt="用户头像" class="w-full h-full object-cover">
                                     </div>
                                     <span class="text-sm text-ink-dark">柳公权</span>
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <div class="avatar-frame status-away w-8 h-8">
-                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                        <img src="assets/avatars/liugongquan.png" alt="用户头像" class="w-full h-full object-cover">
                                     </div>
                                     <span class="text-sm text-ink-dark">欧阳询</span>
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <div class="avatar-frame status-offline w-8 h-8">
-                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                                        <img src="assets/avatars/user.png" alt="用户头像" class="w-full h-full object-cover">
                                     </div>
                                     <span class="text-sm text-ink-dark">苏轼</span>
                                 </div>
@@ -1538,7 +1541,7 @@
             <div class="p-4 border-b border-gray-100">
                 <div class="flex flex-col items-center">
                     <div class="avatar-frame status-online w-20 h-20 mb-3">
-                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                        <img src="assets/avatars/user.png" alt="用户头像" class="w-full h-full object-cover">
                     </div>
                     <h3 class="font-medium text-ink-dark">王羲之</h3>
                     <p class="text-xs text-ink-medium">书法爱好者</p>
@@ -1617,7 +1620,7 @@
                 <div class="space-y-3">
                     <div class="flex items-start space-x-2">
                         <div class="avatar-frame w-8 h-8 mt-1 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/sushi.png" alt="用户头像" class="w-full h-full object-cover">
                         </div>
                         <div>
                             <p class="text-xs text-ink-dark">颜真卿 发布了新动态</p>
@@ -1627,7 +1630,7 @@
                     </div>
                     <div class="flex items-start space-x-2">
                         <div class="avatar-frame w-8 h-8 mt-1 flex-shrink-0">
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231E88E5'/%3E%3Cstop offset='1' stop-color='%237B1FA2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' fill='url(%23g)'/%3E%3Ccircle cx='64' cy='48' r='22' fill='white' fill-opacity='0.9'/%3E%3Cellipse cx='64' cy='98' rx='36' ry='28' fill='white' fill-opacity='0.9'/%3E%3C/svg%3E" alt="用户头像" class="w-full h-full object-cover">
+                            <img src="assets/avatars/guests1.png" alt="用户头像" class="w-full h-full object-cover">
                         </div>
                         <div>
                             <p class="text-xs text-ink-dark">柳公权 评论了你的动态</p>
@@ -1687,8 +1690,8 @@
             localStorage.setItem('mojing_current_user', JSON.stringify(DB.currentUser));
         }
 
-        let PLACEHOLDER_AVATAR = '';
-        let currentChat = { name: '王羲之', avatar: '', isAI: false };
+        let PLACEHOLDER_AVATAR = 'assets/avatars/user.png';
+        let currentChat = { name: '王羲之', avatar: 'assets/avatars/wangxizhi.png', isAI: false };
         let threeInited = false;
         let uiBound = false;
 
@@ -1728,6 +1731,18 @@
 
         function showAuthFlow() {
             try { initThreeScene(); } catch (e) {}
+            if (new URLSearchParams(location.search).has('main')) {
+                const startup = document.getElementById('startup-screen');
+                const auth = document.getElementById('auth-screen');
+                if (startup) startup.remove();
+                if (auth) auth.classList.add('hidden');
+                const main = document.getElementById('main-app');
+                if (main) main.classList.remove('hidden');
+                try { initThreeScene(); } catch (e) {}
+                try { initAfterLogin(); } catch (e) {}
+                try { bindAppUI(); } catch (e) {}
+                return;
+            }
             if (new URLSearchParams(location.search).has('auth')) {
                 const startup = document.getElementById('startup-screen');
                 const auth = document.getElementById('auth-screen');
@@ -1969,9 +1984,9 @@
             input.onkeydown = e => { if (e.key === 'Enter') send(); };
 
             const ai = document.getElementById('ai-assistant');
-            if (ai) ai.onclick = () => switchToChat('电子宠物小月啼', '', true);
+            if (ai) ai.onclick = () => switchToChat('电子宠物小月啼', 'assets/avatars/xiaoyueti.png', true);
             document.querySelectorAll('.demo-contact').forEach(el => {
-                el.onclick = () => switchToChat(el.getAttribute('data-contact-name') || '王羲之', PLACEHOLDER_AVATAR, false);
+                el.onclick = () => switchToChat(el.getAttribute('data-contact-name') || '王羲之', el.getAttribute('data-contact-avatar') || PLACEHOLDER_AVATAR, false);
             });
         }
 
