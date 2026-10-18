@@ -1,0 +1,151 @@
+/* Calligraphy belongs to conversation; functional controls have their own voice. */
+:root {
+  --system-reading-font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --ui-font: var(--system-reading-font);
+  --heading-font: var(--system-reading-font);
+  --reading-font: "KaiTi", "STKaiti", serif;
+  --display-font: "KaiTi", "STKaiti", serif;
+  --reading-size: 20px;
+  --reading-line-height: 1.95;
+}
+
+body {
+  --text-font: var(--ui-font);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  line-height: 1.5;
+  font-synthesis: none;
+}
+button, input, textarea, select, option { font-family: var(--ui-font); }
+h1, h2, h3, h4 { font-family: var(--heading-font); font-weight: 600; }
+body[data-font-scope="all"] :is(h1, h2, h3, h4),
+body[data-font-scope="title"] :is(h1, h2, h3, h4) { font-weight: 400; }
+.world-brand h1 { font-family: var(--display-font); font-size: 27px; font-weight: 400; }
+.world-brand p { font-family: var(--display-font); font-size: 16px; line-height: 1.5; }
+.brandseal, .brand, .selfavatar { font-family: var(--display-font); }
+.avatar { font-family: var(--ui-font); }
+.spacehead h1, .headtext h2, .detailshead h3, .detailsprofile h3, .dialoghead h2 {
+  font-family: var(--heading-font);
+  font-size: 20px;
+  line-height: 1.4;
+}
+.spacehead p, .headtext p { font-family: var(--ui-font); font-size: 12px; line-height: 1.6; }
+.railbtn, .railbtn span { font-family: var(--ui-font); font-size: 12px; }
+.world-actions button, .world-actions button span { font-family: var(--ui-font); font-size: 14px; }
+.search input, .filters button { font-family: var(--ui-font); font-size: 14px; }
+.search kbd, kbd, code, pre { font-family: var(--system-reading-font); }
+.itemtop strong { font-family: var(--ui-font); font-size: 14px; font-weight: 600; }
+.itemtop time { font-family: var(--system-reading-font); font-size: 11px; }
+.preview { font-family: var(--ui-font); font-size: 12px; line-height: 1.6; }
+.unread, .smalltag { font-family: var(--system-reading-font); font-size: 10px; }
+.listlabel, .spacefoot, .spacefoot button { font-family: var(--ui-font); font-size: 12px; }
+.chatpolicy, .chatpolicy button, .networknotice { font-family: var(--ui-font); font-size: 12px; line-height: 1.6; }
+/* Only message prose and the writing field follow the reader's size and spacing. */
+.messages, .bubble, .msg.ai .bubble, .composer textarea {
+  font-family: var(--reading-font);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.bubble strong { font-weight: 400; }
+.msgmeta { font-family: var(--ui-font); font-size: 12px; line-height: 1.5; }
+.msgmeta strong { font-family: var(--ui-font); font-size: 12px; font-weight: 500; }
+.msgmeta time { font-family: var(--system-reading-font); font-size: 11px; }
+.msgactions button, .msgstate { font-family: var(--ui-font); font-size: 12px; line-height: 1.5; }
+.datedivider { font-family: var(--system-reading-font); font-size: 11px; }
+.inlinequote { font-family: var(--reading-font); font-size: max(16px, calc(var(--reading-size) - 2px)); }
+.filebubble strong { font-family: var(--ui-font); font-size: 14px; font-weight: 500; }
+.filebubble small { font-family: var(--ui-font); font-size: 12px; }
+.quickactions, .quickactions span, .quickactions button { font-family: var(--ui-font); font-size: 12px; line-height: 1.5; }
+.mention, .sendbtn { font-family: var(--ui-font); font-size: 14px; }
+.keyhint { font-family: var(--system-reading-font); font-size: 11px; }
+.composenote { font-family: var(--ui-font); font-size: 11px; line-height: 1.6; }
+.quotebar, .attachment { font-family: var(--ui-font); font-size: 13px; }
+.detailsprofile p, .memberrow, .detailsection h4, .policybox, .policybox p, .policybox button, .policybox select, .detailfile, .detailaction, .toggleline { font-family: var(--ui-font); font-size: 14px; line-height: 1.6; }
+.memberrow small, .detailfile small { font-family: var(--ui-font); font-size: 12px; }
+.policybox strong { font-family: var(--ui-font); font-size: 14px; font-weight: 600; }
+.scene-card span { font-family: var(--display-font); font-size: 22px; }
+.scene-card small, .empty, .dialogcopy, .dialogchoice small, .settingsrow, .settingsrow button, .secondarybtn, .dialogfield, .dialoginput, .savedrow, .searchresult, #toast { font-family: var(--ui-font); font-size: 14px; line-height: 1.6; }
+.dialogchoice strong { font-family: var(--ui-font); font-size: 14px; font-weight: 600; }
+.savedrow small, .searchresult strong { font-family: var(--ui-font); font-size: 12px; }
+.samplebar { font-family: var(--system-reading-font); }
+
+/* Font management stays readable even in full-interface calligraphy mode. */
+dialog.typography-dialog {
+  width: 790px;
+  max-width: min(790px, calc(100vw - 36px));
+  max-height: calc(100dvh - 44px);
+  font-family: var(--system-reading-font);
+  font-size: 14px;
+}
+.typography-dialog .dialoghead h2 { font-family: var(--system-reading-font); font-size: 20px; font-weight: 600; }
+.typography-dialog button, .typography-dialog input, .typography-dialog select, .typography-dialog label, .typography-dialog .dialogcopy { font-family: var(--system-reading-font); font-size: 14px; }
+.typography-dialog .dialogcopy { line-height: 1.65; }
+.font-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin: 16px 0; }
+.font-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 108px;
+  text-align: left;
+  padding: 11px 13px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+}
+.font-choice:hover { border-color: var(--accent); background: var(--glass); }
+.font-choice:is([aria-pressed="true"], [aria-selected="true"], .selected) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--glass); }
+.font-choice strong { display: block; font-family: var(--system-reading-font); font-size: 14px; line-height: 1.5; font-weight: 500; }
+.font-choice small { display: block; font-family: var(--system-reading-font); font-size: 12px; color: var(--muted); line-height: 1.6; }
+.font-choice-sample, .font-choice .font-sample { display: block; font-size: 20px; line-height: 1.6; font-weight: 400; overflow-wrap: anywhere; }
+.font-choice-note { display: block; font-family: var(--system-reading-font); font-size: 12px; line-height: 1.55; color: var(--muted); }
+.font-preview { padding: 17px 20px; margin: 15px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bubble); color: var(--ink); font-family: var(--reading-font); font-size: var(--reading-size); line-height: var(--reading-line-height); overflow-wrap: anywhere; }
+.font-preview h3, .font-preview .font-preview-title { margin: 0 0 10px; font-family: var(--display-font); font-size: 29px; font-weight: 400; line-height: 1.6; }
+.font-preview p, .font-preview .font-preview-text { margin: 0; font-family: var(--reading-font); font-size: var(--reading-size); line-height: var(--reading-line-height); }
+.font-preview small { display: block; margin-top: 10px; font-family: var(--system-reading-font); font-size: 12px; color: var(--muted); line-height: 1.6; }
+.font-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; margin: 16px 0; padding-top: 15px; border-top: 1px solid var(--line); }
+.font-controls label { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-family: var(--system-reading-font); font-size: 14px; line-height: 1.6; color: var(--ink); }
+.font-controls label > span { flex-shrink: 0; }
+.font-controls input[type="range"] { min-width: 90px; flex: 1; width: 100%; accent-color: var(--accent); height: 25px; }
+.font-controls output { margin-left: auto; min-width: 34px; text-align: right; font-family: var(--system-reading-font); font-size: 14px; }
+.font-controls input[type="number"] { width: 72px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); padding: 5px 7px; font-size: 14px; }
+.font-controls select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); font-size: 14px; }
+.font-controls input[type="checkbox"], .font-controls input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; }
+.font-import { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); }
+.font-import label { width: 100%; font-size: 14px; line-height: 1.6; }
+.font-import input:not([type="file"]) { flex: 1 1 170px; min-width: 0; width: 100%; padding: 9px 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; font-size: 14px; }
+.font-import button { padding: 8px 13px; min-height: 39px; border: 1px solid var(--line); border-radius: 5px; font-size: 14px; background: var(--glass); color: var(--ink); }
+.font-import button:hover { border-color: var(--accent); }
+.font-import input[type="file"] { min-width: 0; width: 100%; font-size: 14px; }
+.font-status { margin: 9px 0 0; color: var(--muted); font-family: var(--system-reading-font); font-size: 12px; line-height: 1.75; overflow-wrap: anywhere; }
+.font-status:is(.error, [data-status="error"]) { color: var(--error); }
+.font-status:is(.success, [data-status="success"]) { color: var(--accent); }
+
+@media (max-width: 720px) {
+  .world-brand h1 { font-size: 24px; }
+  .world-brand p { font-size: 14px; }
+  .headtext h2, .spacehead h1 { font-size: 20px; }
+  .font-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  dialog.typography-dialog { max-width: calc(100vw - 28px); padding: 19px; }
+}
+@media (max-width: 490px) {
+  .world-brand h1 { font-size: 23px; }
+  .world-actions button, .world-actions button span { font-size: 12px; }
+  .font-choice { padding: 11px; min-height: 108px; }
+  .font-choice-sample, .font-choice .font-sample { font-size: 20px; }
+  .font-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .font-preview { padding: 14px; }
+  .font-preview h3, .font-preview .font-preview-title { font-size: 26px; }
+}
+@media (max-width: 350px) {
+  .world-brand h1 { font-size: 21px; }
+  .world-brand p { font-size: 13px; }
+  dialog.typography-dialog { padding: 16px; }
+  .font-grid { gap: 9px; }
+  .font-choice { padding: 10px; min-height: 104px; }
+  .font-choice-sample, .font-choice .font-sample { font-size: 18px; }
+}
+

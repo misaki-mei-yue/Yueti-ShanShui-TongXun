@@ -1,0 +1,76 @@
+山水通讯 1.3.0 · 第三方资源说明
+
+软件运行环境
+服务器包附带 Node.js 的官方 Linux 运行时，保留各自 LICENSE 文件。
+Windows 客户端使用 Electron，保留 Electron/Chromium 随附的开源许可说明。
+
+背景画作
+以下画作的来源、作者和许可链接也可在应用的“画作来源”页面查看：
+
+1. 查士标《四季山水图册·仿倪瓒山水》1684
+   克利夫兰美术馆 1955.37.1，图片 CC0。
+   https://www.clevelandart.org/art/1955.37.1
+2. 陈洪绶《仿古山水册·仿倪瓒山水》
+   克利夫兰美术馆 1979.27.1.10，图片 CC0。
+   https://www.clevelandart.org/art/1979.27.1.10
+3. 翟大坤《山水画》1775
+   克利夫兰美术馆 1986.49.2，图片 CC0。
+   https://www.clevelandart.org/art/1986.49.2
+4. 克洛德·莫奈《睡莲》1906
+   芝加哥艺术博物馆 16568，公共领域图片。
+   https://www.artic.edu/artworks/16568/water-lilies
+5. 文森特·梵高《罗讷河上的星夜》1888
+   Wikimedia Commons，公共领域原作的忠实复制（PD-Art）。
+   https://commons.wikimedia.org/wiki/File:Starry_Night_Over_the_Rhone.jpg
+
+reference-*.png 是本次项目用户提供的山水与行旅图片；未核实作者，
+未声称原创、公共领域或另行获得商业再分发许可。用于用户自己的聊天空间。
+卤猫、Heikala、武政谅的网页只作为画作参考链接，未嵌入其作品文件。
+没有使用 AI 生成的背景图片。
+
+初始表情
+public/stickers/yueti 的 11 张原图由本项目用户提供，按原字节打包，没有使用
+AI 生成或修改。使用中性的序号文件名，未包含原下载文件名或其中的会话参数。
+作者及另行商业再分发授权未核实，保留原作品权利，用于用户自己的聊天空间。
+
+字体
+保留瘦金体为默认书体偏好，并支持用户安装或导入的瘦金、柳体、毛体、
+颜体、欧体、赵体、楷体、行楷和隶书字库。
+安装包及服务器包不附带设计阶段下载的“汉仪瘦金书简”评估 TTF。
+公开下载链接并不代表获得软件嵌入许可。未检测到对应字体时，
+界面会明确显示实际回退字体；系统字体仅通过本机调用，不随包分发。
+汉仪产品说明：https://www.hanyi.com.cn/productdetail.php?id=496
+字体许可说明：https://www.hanyi.com.cn/faq-doc-1
+
+本文件不改变任何第三方资源原有的许可条件。
+
+山岚的长期记忆
+public/ai-memory.mjs 中的记忆提取规则与 BM25 检索适配自 ReMe 0.4.1.13。
+Copyright 2025 Alibaba Group，Apache License 2.0。
+官方项目：https://github.com/agentscope-ai/ReMe
+使用提交：081f5df39a28d862c2771439a1740eca7f019998
+对应原文件：
+https://github.com/agentscope-ai/ReMe/blob/081f5df39a28d862c2771439a1740eca7f019998/reme/steps/evolve/auto_memory.yaml
+https://github.com/agentscope-ai/ReMe/blob/081f5df39a28d862c2771439a1740eca7f019998/reme/components/keyword_index/bm25_index.py
+完整 Apache-2.0 许可文本随 public/vendor/reme-LICENSE.txt 分发。
+
+修改说明：将原 Python 检索逻辑改写为设备侧 JavaScript，使用内存数组和
+中文双字切分；将事实提取、跳过无关内容和合并的规则适配为受限 JSON 提取，
+要求用户原句依据，排除凭据与操作指令。只处理本账户与山岚的单独私聊，
+在设备侧解密与检索，并将加密后的记忆同步至服务器。
+未嵌入 ReMe 的完整代理、工具、向量库或 Python 运行时。
+QwenPaw（https://github.com/agentscope-ai/QwenPaw）用于研究集成方向，
+本版本没有移植或宣称完整集成 QwenPaw；实际复用范围为上述 ReMe 组件。
+
+端到端加密
+OpenPGP.js 6.3.2，由 OpenPGP.js contributors 开发，LGPL-3.0-or-later。
+项目与构建说明：https://github.com/openpgpjs/openpgpjs/tree/v6.3.2
+发行版本：https://github.com/openpgpjs/openpgpjs/releases/tag/v6.3.2
+使用官方 npm 发行包，已按 registry SHA-512 integrity 校验。
+未修改库实现，库文件、非压缩版本、源映射、完整对应源码归档及 LGPL/GPL
+许可文本均随 public/vendor 打包。源码归档包含原始源码及构建配置。
+服务器、Windows 和 Android 安装包均内置同一版本，不在运行时加载 CDN。
+本应用允许为修改这些 LGPL 库而对其进行调试、替换及必要的逆向工程。
+Windows 可提取 app.asar 替换库后重新打包；Android 可修改 assets/public/vendor
+并自行重签安装包。Android 自行重签后不是原签名更新，需要独立安装或备份后重装。
+应用源代码在本次交付的 shanshui-1.3.0 目录；本段不限制 LGPL 已授予的权利。

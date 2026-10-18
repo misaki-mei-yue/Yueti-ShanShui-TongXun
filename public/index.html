@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <title>山水通讯</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="painting.css">
+  <link rel="stylesheet" href="typography.css">
+  <link rel="stylesheet" href="live.css">
+</head>
+<body data-scene="ink">
+<div class="world-backdrop" aria-hidden="true"></div><div class="world-wash" aria-hidden="true"></div>
+<header class="world-header">
+  <div class="world-brand"><div class="brandseal" aria-hidden="true">月<br>啼</div><div><h1>月啼山水通讯</h1><p>一川烟雨，满室清欢</p></div></div>
+  <div class="appearance-controls">
+    <button id="scene-picker" aria-haspopup="dialog"><i data-icon="mountain"></i>换幅画</button>
+    <details class="appearance-menu" id="appearance-menu"><summary><i data-icon="settings"></i>外观</summary><div class="world-actions">
+      <button id="weather" aria-label="切换飘雪与落樱"><span aria-hidden="true">❄</span>飘雪</button>
+      <button id="motion" aria-pressed="true">静止</button>
+      <button id="focus-scene" aria-pressed="false">看画</button>
+      <button id="font-shortcut">字体与书法</button>
+      <button id="theme" aria-label="切换日景与夜景">夜景</button>
+    </div></details>
+  </div>
+</header>
+<section id="auth" class="auth-shell" aria-label="登录山水通讯"><div class="auth-card"><h2>欢迎回到山水之间</h2><p class="dialogcopy">正在连接你的聊天空间…</p></div></section>
+<div class="app no-details" id="app" hidden>
+  <nav class="rail" aria-label="主导航">
+    <div class="brand" aria-label="山水"><span>山</span></div>
+    <button class="railbtn active" data-nav="chat" aria-label="聊天" title="聊天"><i data-icon="chat"></i><span>聊天</span></button>
+    <button class="railbtn" data-nav="people" aria-label="联系人" title="联系人"><i data-icon="people"></i><span>联系人</span></button>
+    <button class="railbtn" data-nav="saved" aria-label="收藏" title="收藏"><i data-icon="bookmark"></i><span>收藏</span></button>
+    <div class="railspacer"></div>
+    <button class="railbtn" id="settings" aria-label="账户与设置"><i data-icon="settings"></i><span>设置</span></button>
+    <button class="selfavatar" id="self-avatar" type="button" aria-label="更换我的头像" title="更换我的头像" aria-haspopup="dialog">月</button>
+  </nav>
+  <aside class="conversations" aria-label="会话列表">
+    <div class="spacehead"><div><h1>消息</h1><p>朋友与 AI，都在这里</p></div><button class="iconbtn" id="newchat" aria-label="新建会话" title="新建会话"><i data-icon="plus"></i></button></div>
+    <label class="search"><i data-icon="search"></i><input id="search" aria-label="按名称或消息内容筛选会话" placeholder="筛选会话"><kbd>Ctrl K</kbd></label>
+    <div class="filters" aria-label="筛选会话"><button data-filter="all" class="selected" aria-pressed="true">全部</button><button data-filter="person" aria-pressed="false">朋友</button><button data-filter="ai" aria-pressed="false">AI</button><button data-filter="unread" aria-pressed="false">未读</button></div>
+    <div id="chatlist" class="chatlist"></div>
+    <div class="spacefoot"><span class="statusdot"></span><span id="connection">连接中</span><button id="reconnect" title="重新连接">重连</button></div>
+  </aside>
+  <main class="conversation" id="conversation">
+    <header class="chathead"><button class="iconbtn back" id="back" aria-label="返回会话列表"><i data-icon="back"></i></button><div id="headavatar" class="avatar"></div><div class="headtext"><h2 id="chatname"></h2><p id="chatsub"></p></div><div class="headtools"><button class="iconbtn" id="chatsearch" aria-label="查找聊天记录" title="查找聊天记录"><i data-icon="search"></i></button><button class="iconbtn" id="info" aria-label="会话详情" aria-expanded="true" title="会话详情"><i data-icon="panel"></i></button></div></header>
+    <div id="networknotice" class="networknotice" hidden>连接暂时中断。未发送成功的消息会保留，可稍后重试。</div>
+    <div id="chatpolicy" class="chatpolicy"></div>
+    <div class="messages" id="messages" role="log" aria-label="聊天消息"></div>
+    <section class="composearea" aria-label="编辑消息">
+      <div class="quickactions" id="quickactions"><span>请山岚帮忙</span><button data-prompt="@山岚 总结一下刚才的讨论">总结讨论</button><button data-prompt="@山岚 把讨论整理成待办">整理待办</button></div>
+      <form id="sendform" class="composer">
+        <div class="quotebar" id="quote" hidden><span id="quotetext"></span><button class="iconbtn" type="button" id="cancelquote" aria-label="取消引用">×</button></div>
+        <div id="attachment" class="attachment" hidden><i data-icon="file"></i><span id="attachmentname"></span><button type="button" id="removefile" aria-label="移除附件">×</button></div>
+        <label class="sr-only" for="input">消息内容</label><textarea id="input" rows="1" placeholder="聊点什么吧，@山岚 可以请 AI 帮忙"></textarea>
+        <div class="composertools"><div class="toolleft"><button class="iconbtn" type="button" id="emoji" aria-label="插入表情" title="插入表情"><i data-icon="smile"></i></button><button class="iconbtn" type="button" id="attach" aria-label="选择附件" title="选择附件"><i data-icon="attach"></i></button><button type="button" class="mention" id="mention" aria-label="插入 @山岚" aria-controls="input" title="在光标处插入 @山岚，不会立即发送" hidden>@山岚</button></div><span class="keyhint">Enter 发送 · Shift Enter 换行</span><button class="sendbtn" id="send" type="submit">发送<i data-icon="send"></i></button><button class="sendbtn" id="stop" type="button" hidden>停止生成</button></div>
+      </form>
+      <p class="composenote" id="composenote">AI 仅在被 @ 时参与，可在会话详情调整读取范围。</p>
+    </section>
+  </main>
+  <aside class="details" id="details" aria-label="会话详情"></aside>
+</div>
+<dialog id="dialog"><div class="dialoghead"><h2 id="dialogtitle"></h2><button class="iconbtn" id="closedialog" aria-label="关闭对话框">×</button></div><div id="dialogcontent"></div></dialog>
+<dialog id="security-dialog" class="security-dialog" aria-labelledby="security-title"><div id="security-content"></div></dialog>
+<dialog id="trust-dialog" class="security-dialog" aria-labelledby="trust-title"><div id="trust-content"></div></dialog>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<input id="fileinput" type="file" hidden>
+<input id="photoinput" type="file" accept="image/*" hidden>
+<script src="typography.js"></script>
+<script src="profile-avatar.js"></script>
+<script type="module" src="app.js"></script>
+<script src="scene-effects.js"></script>
+</body>
+</html>

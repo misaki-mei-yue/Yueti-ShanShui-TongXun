@@ -1,59 +1,30 @@
-# 月啼山水通讯（墨境）
+# 月啼山水通讯 · Yueti ShanShui TongXun
 
-东方水墨美学通讯桌面应用。纯前端本地运行：启动闪屏 → 注册/登录 → 七大功能区（消息、联系人、动态、文件、艺术聊天室、智慧协作、社交游戏厅）。
+水墨山水风格的端到端加密通讯软件（Windows / Android / 网页 + 自托管服务器）。
+An ink-landscape styled end-to-end encrypted messenger (Windows / Android / Web + self-hosted server).
 
-## 功能概览
+当前版本 / Current version: **1.4.1** — 安装包见 / binaries: [Releases](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.4.1)
 
-- **账号**：本地 `localStorage` 注册 / 登录 / 会话恢复
-- **好友**：侧栏搜索账号添加；联系人含「电子宠物小月啼」本地助手
-- **界面**：大版本水墨 UI + Three.js 粒子背景 + 主题切换
-- **离线**：外链图片已替换为 SVG 占位，无后端亦可浏览
+## 目录 / Layout
 
-## 直接打开 HTML
+| 路径 Path | 内容 Contents |
+|---|---|
+| `server/` | 1.4.1 服务器源码（Node.js，`node server/main.js`）/ server source |
+| `public/` | 1.4.1 网页客户端源码（Windows/Android 客户端共用界面）/ web client source |
+| `deploy/deploy-shanshui-opt.sh` | Linux 安装和升级脚本 / install & upgrade script |
+| `docs/` | 1.4.1 发布说明、升级说明 / release & upgrade notes |
+| `legacy/1.1.x/` | 早期 1.1.x Electron 客户端源码 / early 1.1.x Electron client |
 
-1. 用浏览器打开 `index.html`（推荐 Chrome / Edge）
-2. 等待启动画面 → 注册账号并登录
-3. 刷新后若已登录会自动进入主界面
+运行 / Run: Node.js ≥ 24，`npm start`（数据目录、端口等见 `deploy/` 脚本与 `docs/`）。
 
-> 需联网加载 Tailwind / Font Awesome / Three.js / GSAP CDN；其余逻辑在本地。
+## 许可证 / License
 
-## Electron 开发运行
+**AGPL-3.0 + 商业授权双协议 / Dual-licensed: AGPL-3.0 + Commercial.**
 
-```bash
-cd mojing
-npm install
-npm start
-```
+- 默认按 [AGPL-3.0](LICENSE) 开源：修改后分发或通过网络提供服务，必须公开完整源码。
+  Open source under [AGPL-3.0](LICENSE): if you distribute it or provide it as a network service, you must publish the complete source including modifications.
+- **闭源商用必须先取得版权持有人 misaki-mei-yue 的书面商业授权**，详见 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)。
+  **Closed-source commercial use requires a written commercial license from misaki-mei-yue.** See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+- 申请商业授权请提 [Issue](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/issues) 或通过 GitHub 主页 [@misaki-mei-yue](https://github.com/misaki-mei-yue) 联系。
 
-## Windows 一键包
-
-已构建的便携版（若存在）：
-
-- `dist/Mojing-1.0.0-portable.exe` — 双击即可运行，无需安装
-
-自行打包（在本机或本仓库）：
-
-```bash
-npm run dist
-```
-
-需要 Wine 才能在 Linux 上交叉编译 Windows 目标。若失败可试：
-
-```bash
-npm run dist:dir    # 生成未打包的 win-unpacked
-npm run dist:linux  # Linux AppImage 备选
-```
-
-## 使用提示
-
-1. 注册两个账号可互相搜索加好友
-2. 联系人 →「电子宠物小月啼」可本地对话
-3. 演示联系人「王羲之」可体验墨境聊天气泡
-4. 侧栏退出图标可注销当前会话
-
-## 目录
-
-- `index.html` — 合并后的完整应用
-- `main.js` — Electron 主进程
-- `package.json` — 依赖与 electron-builder 配置
-- `build/icon.png` — 应用图标
+Copyright © 2026 misaki-mei-yue. 第三方组件许可见 / Third-party notices: [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).

@@ -1,0 +1,76 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "yueti-shanshui-tongxun",
+  "version": "1.1.3",
+  "description": "月啼山水通讯：东方水墨美学通讯桌面应用",
+  "author": "MEI",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --x64 --publish never",
+    "dist:nsis": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "electron-builder --linux AppImage --x64 --publish never",
+    "dist:dir": "electron-builder --win dir --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mei.yueti.shanshui",
+    "productName": "月啼山水通讯",
+    "copyright": "Copyright MEI",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "package.json",
+      "build/icon.png",
+      "assets/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "YuetiShanShui-${version}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "YuetiShanShui-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "月啼山水通讯",
+      "uninstallDisplayName": "月啼山水通讯",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
+      "language": "2052",
+      "artifactName": "YuetiShanShui-${version}-Setup.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network",
+      "artifactName": "Mojing-${version}.${ext}",
+      "icon": "build/icon.png"
+    },
+    "forceCodeSigning": false
+  },
+  "productName": "月啼山水通讯"
+}
