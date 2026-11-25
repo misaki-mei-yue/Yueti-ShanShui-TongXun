@@ -3,16 +3,16 @@
 水墨山水风格的端到端加密通讯软件（Windows / Android / 网页 + 自托管服务器）。
 An ink-landscape styled end-to-end encrypted messenger (Windows / Android / Web + self-hosted server).
 
-当前版本 / Current version: **1.4.1** — 安装包见 / binaries: [Releases](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.4.1)
+当前版本 / Current version: **1.5.1** — 安装包见 / binaries: [Releases](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.5.1)
 
 ## 目录 / Layout
 
 | 路径 Path | 内容 Contents |
 |---|---|
-| `server/` | 1.4.1 服务器源码（Node.js，`node server/main.js`）/ server source |
-| `public/` | 1.4.1 网页客户端源码（Windows/Android 客户端共用界面）/ web client source |
+| `server/` | 1.5.1 服务器源码（Node.js，`node server/main.js`）/ server source |
+| `public/` | 1.5.1 网页客户端源码（Windows/Android 客户端共用界面）/ web client source |
 | `deploy/deploy-shanshui-opt.sh` | Linux 安装和升级脚本 / install & upgrade script |
-| `docs/` | 1.4.1 发布说明、升级说明 / release & upgrade notes |
+| `docs/` | 1.5.1 发布说明、升级说明 / release & upgrade notes |
 | `legacy/1.1.x/` | 早期 1.1.x Electron 客户端源码 / early 1.1.x Electron client |
 
 运行 / Run: Node.js ≥ 24，`npm start`（数据目录、端口等见 `deploy/` 脚本与 `docs/`）。

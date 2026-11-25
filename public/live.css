@@ -273,6 +273,11 @@ body.dark .legacy-tag { background:#544633; color:#efd29d; }
 .ai-authorized-users { max-height:240px; overflow:auto; margin-top:10px; }
 .account-form .ai-authorized-users .choice-user { display:flex; margin:0; }
 .account-form .ai-authorized-users .choice-user input { flex:0 0 17px; width:17px; height:17px; margin:0; padding:0; }
+#archive-own h4,#archive-assistance h4 { color:var(--ink); font-weight:650; }
+#archive-assist-status > button,#archive-assist-status .policybox button { margin:8px 8px 0 0; }
+#archive-assist-status .policybox { margin-top:12px; }
+#archive-assist-chat { margin-bottom:4px; }
+#archive-own input[type="password"] { font-family:var(--ui-font); }
 .ai-authorized-users .choice-user span { min-width:0; overflow-wrap:anywhere; }
 #ai-endpoint-review { overflow-wrap:anywhere; white-space:pre-wrap; }
 @media(max-width:420px) { .contacts-tabs { padding:10px 12px 0; gap:3px; } .contacts-tabs button { padding:6px 8px; font-size:13px; } .friend-request-row .friend-actions { flex-basis:100%; padding-left:50px; } .friend-row .friend-remove { padding:6px 3px; white-space:nowrap; } }

@@ -13,8 +13,10 @@ const { createCredentialBroker, BASE_URL: AI_BASE_URL, DEFAULTS: AI_DEFAULTS, BO
 const { createSharedConfigurationStore } = require('./ai-shared.cjs');
 const { createAIMemoryStore } = require('./ai-memory.cjs');
 const { createAttachmentStore } = require('./attachments.cjs');
+const { createPasswordAccessStore } = require('./password-access.cjs');
+const { SCHEMA: ARCHIVE_ASSIST_SCHEMA, createArchiveAssist } = require('./archive-assist.js');
 const scrypt = promisify(crypto.scrypt);
-const VERSION = '1.4.1';
+const VERSION = '1.5.1';
 const openpgpReady = import(pathToFileURL(path.join(__dirname, '..', 'public', 'vendor', 'openpgp.min.mjs')).href);
 const AI_USER = Object.freeze({ id: 'ai', username: 'ai', displayName: '山岚', avatarUrl: '', role: 'user' });
 const MB = 1024 * 1024;
@@ -106,7 +108,7 @@ function createApplication(options = {}) {
   const dbFile = path.join(dataDir, 'shanshui.sqlite');
   const db = new DatabaseSync(dbFile);
   const schemaVersion = db.prepare('PRAGMA user_version').get().user_version;
-  if (schemaVersion > 3) { db.close(); throw new Error('数据版本比服务器更新，禁止降级启动。'); }
+  if (schemaVersion > 5) { db.close(); throw new Error('数据版本比服务器更新，禁止降级启动。'); }
   try { fs.chmodSync(dbFile, 0o600); } catch { /* ACLs govern Windows. */ }
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',avatar_path TEXT,avatar_mime TEXT,avatar_version TEXT,created_at TEXT NOT NULL);
@@ -129,6 +131,10 @@ function createApplication(options = {}) {
       for (const [column, type] of columns) if (!existing.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
     db.exec(`CREATE TABLE IF NOT EXISTS identities(user_id TEXT PRIMARY KEY REFERENCES users(id),fingerprint TEXT NOT NULL,public_key TEXT NOT NULL,encrypted_private_key TEXT NOT NULL,proof TEXT NOT NULL,created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS password_access(user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,fingerprint TEXT NOT NULL,access TEXT NOT NULL,proof TEXT NOT NULL,revision INTEGER NOT NULL,updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS historical_identities(user_id TEXT NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,public_key TEXT NOT NULL,encrypted_private_key TEXT NOT NULL,proof TEXT NOT NULL,created_at TEXT NOT NULL,archived_at TEXT NOT NULL,PRIMARY KEY(user_id,fingerprint));
+      CREATE TABLE IF NOT EXISTS chat_archives(chat_id TEXT PRIMARY KEY REFERENCES chats(id),successor_id TEXT NOT NULL UNIQUE REFERENCES chats(id),reset_user_id TEXT NOT NULL REFERENCES users(id),archived_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ai_private_memory_archive(user_id TEXT NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,revision INTEGER NOT NULL,ciphertext TEXT NOT NULL,ciphertext_hash TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT NOT NULL,PRIMARY KEY(user_id,fingerprint));
       CREATE TABLE IF NOT EXISTS friendships(user_a TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,user_b TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,accepted_at TEXT NOT NULL,PRIMARY KEY(user_a,user_b),CHECK(user_a<user_b));
       CREATE INDEX IF NOT EXISTS friendships_user_b ON friendships(user_b,user_a);
       CREATE TABLE IF NOT EXISTS friend_requests(id TEXT PRIMARY KEY,user_a TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,user_b TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,sender_id TEXT NOT NULL REFERENCES users(id),recipient_id TEXT NOT NULL REFERENCES users(id),status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','cancelled')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(user_a,user_b),CHECK(user_a<user_b),CHECK(sender_id<>recipient_id),CHECK((sender_id=user_a AND recipient_id=user_b) OR (sender_id=user_b AND recipient_id=user_a)));
@@ -141,16 +147,19 @@ function createApplication(options = {}) {
       CREATE TRIGGER IF NOT EXISTS messages_protect_ciphertext_update BEFORE UPDATE ON messages
         WHEN OLD.content_version=1 AND (NEW.content_version<>1 OR NEW.envelope IS NULL OR NEW.envelope='' OR NEW.text<>'' OR NEW.reply_to IS NOT NULL)
         BEGIN SELECT RAISE(ABORT,'E2EE content cannot be downgraded'); END;
-      PRAGMA user_version=3;`);
+      PRAGMA user_version=5;`);
+    db.exec(ARCHIVE_ASSIST_SCHEMA);
     db.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES('serverInstanceId',?)").run(id());
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); db.close(); throw error; }
-  fs.writeFileSync(path.join(dataDir, 'minimum-compatible-schema'), '3\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(dataDir, 'minimum-compatible-schema'), '5\n', { mode: 0o600 });
   db.prepare("UPDATE messages SET ai_status='failed',text=CASE WHEN text='' THEN '升级前的模型生成已中断。' ELSE text || char(10) || '（升级前的模型生成已中断）' END WHERE content_version=0 AND ai_status='generating'").run();
   const serverId = db.prepare("SELECT value FROM settings WHERE key='serverInstanceId'").get().value;
   const sharedAi = createSharedConfigurationStore({ db, serverId, canonical, fail, verifyDetached, validateCiphertext });
   const privateAiMemory = createAIMemoryStore({ db, fail, validateCiphertext });
+  const passwordAccess = createPasswordAccessStore({db,serverId,canonical,fail,verifyDetached});
   const attachments = createAttachmentStore({ db, filesDir, fail, body, json, requireChat, requireChatWrite, validateCiphertext, transaction, ...(options.attachmentReserveBytes===undefined?{}:{reserveBytes:options.attachmentReserveBytes}) });
+  const archiveAssist=createArchiveAssist({db,serverId,canonical,sha,fail,exactKeys,verifyDetached,validateCiphertext,requireChat,requireFriend,body,json,transaction,authorize(auth,res){if(res.destroyed||!q('SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?',auth.tokenHash,auth.user.id,Date.now()))fail(409,'协助恢复登录状态已经变化');},onChanged:sendEvent});
   const setupFile = path.join(dataDir, 'setup-token');
   let setupToken = options.setupToken || process.env.SETUP_TOKEN || '';
   if (!setupToken && !db.prepare('SELECT 1 FROM users LIMIT 1').get()) {
@@ -190,11 +199,15 @@ function createApplication(options = {}) {
     if (friendship(userId, otherId).friendshipStatus !== 'accepted') fail(403, '请先添加好友，待对方通过后再开始聊天', { code: 'FRIENDSHIP_REQUIRED' });
   }
   function directCanMessage(chat, userId) {
+    if (q('SELECT 1 FROM chat_archives WHERE chat_id=?',chat.id)) return false;
     if (chat.kind !== 'direct') return true;
     const humans = all("SELECT user_id FROM members WHERE chat_id=? AND user_id<>'ai'", chat.id).map(row => row.user_id);
     return humans.length === 2 && humans.includes(userId) && friendship(userId, humans.find(other => other !== userId)).friendshipStatus === 'accepted';
   }
-  function requireChatWrite(chat, user) { if (!directCanMessage(chat, user.id)) fail(403, '请先添加好友，待对方通过后再开始聊天', { code: 'FRIENDSHIP_REQUIRED' }); }
+  function requireChatWrite(chat, user) {
+    if(q('SELECT 1 FROM chat_archives WHERE chat_id=?',chat.id))fail(409,'旧加密会话仅可阅读，请打开替代会话继续聊天',{code:'CHAT_ARCHIVED'});
+    if (!directCanMessage(chat, user.id)) fail(403, '请先添加好友，待对方通过后再开始聊天', { code: 'FRIENDSHIP_REQUIRED' });
+  }
   function fileJson(row) { return row ? { id: row.id, name: row.encrypted ? '加密附件.pgp' : row.name, size: row.size, mime: row.encrypted ? 'application/octet-stream' : row.mime, encrypted: !!row.encrypted, legacy: !row.encrypted, url: `/api/files/${row.id}`,...attachments.metadata(db.prepare('SELECT * FROM chunked_files WHERE file_id=?').get(row.id)) } : null; }
   function messageJson(row) {
     if (!row) return null;
@@ -207,7 +220,8 @@ function createApplication(options = {}) {
     let name = row.name;
     if (row.kind === 'direct') name = members.find((x) => x.id !== userId)?.displayName || '私聊';
     const relation = row.kind === 'direct' ? friendship(userId, members.find(member => member.id !== userId && member.id !== 'ai')?.id || '') : { friendshipStatus: null, friendRequestId: null };
-    return { id: row.id, name, kind: row.kind, members, canMessage: directCanMessage(row, userId), ...relation, unread: q('SELECT count(*) AS n FROM messages WHERE chat_id=? AND seq>? AND sender_id<>?', row.id, membership.last_seq, userId).n, pinned: !!membership.pinned, muted: !!membership.muted, context: row.context, lastMessage: messageJson(q('SELECT * FROM messages WHERE chat_id=? ORDER BY seq DESC LIMIT 1', row.id)), updatedAt: row.updated_at, ownerId: row.owner_id, e2eeRevision: row.e2ee_revision };
+    const archive=q('SELECT successor_id FROM chat_archives WHERE chat_id=?',row.id), predecessor=q('SELECT chat_id FROM chat_archives WHERE successor_id=?',row.id);
+    return { id: row.id, name, kind: row.kind, members, canMessage: directCanMessage(row, userId), ...relation, ...(archive?{archived:true,successorId:archive.successor_id,archiveReason:'identity-reset',...(row.kind==='direct'&&relation.friendshipStatus==='accepted'&&archiveAssist.incoming(row.id,userId)?{archiveAssistPending:true}:{})}:{}), ...(predecessor?{predecessorId:predecessor.chat_id}:{}), unread: q('SELECT count(*) AS n FROM messages WHERE chat_id=? AND seq>? AND sender_id<>?', row.id, membership.last_seq, userId).n, pinned: !!membership.pinned, muted: !!membership.muted, context: row.context, lastMessage: messageJson(q('SELECT * FROM messages WHERE chat_id=? ORDER BY seq DESC LIMIT 1', row.id)), updatedAt: row.updated_at, ownerId: row.owner_id, e2eeRevision: row.e2ee_revision };
   }
   function requireChat(chatId, user) {
     const chat = q('SELECT c.* FROM chats c JOIN members m ON m.chat_id=c.id WHERE c.id=? AND m.user_id=?', chatId, user.id);
@@ -287,6 +301,33 @@ function createApplication(options = {}) {
   function identityJson(row, includeBackup = false) {
     return row ? { userId: row.user_id, fingerprint: row.fingerprint, publicKey: row.public_key, ...(includeBackup ? { encryptedPrivateKey: row.encrypted_private_key } : {}) } : null;
   }
+  function previousFingerprints(userId) { return all('SELECT fingerprint FROM historical_identities WHERE user_id=? ORDER BY archived_at,fingerprint',userId).map(row=>row.fingerprint); }
+  function currentIdentity(userId) {return identityJson(q('SELECT * FROM identities WHERE user_id=?',userId),true);}
+  async function verifyIdentity(data,userId) {
+    exactKeys(data,['userId','fingerprint','publicKey','encryptedPrivateKey','proof'],'加密身份');
+    if(data.userId!==userId||typeof data.fingerprint!=='string'||!/^[a-f0-9]{40,64}$/.test(data.fingerprint))fail(400,'加密身份不属于当前用户');
+    if(typeof data.publicKey!=='string'||data.publicKey.length>64000||!data.publicKey.startsWith('-----BEGIN PGP PUBLIC KEY BLOCK-----')||typeof data.encryptedPrivateKey!=='string'||data.encryptedPrivateKey.length>80000||!data.encryptedPrivateKey.startsWith('-----BEGIN PGP PRIVATE KEY BLOCK-----'))fail(400,'公钥或加密备份格式不正确');
+    let publicKey;
+    try {
+      const pgp=await openpgpReady;
+      publicKey=await pgp.readKey({armoredKey:data.publicKey});
+      const backup=await pgp.readPrivateKey({armoredKey:data.encryptedPrivateKey});
+      if(publicKey.isPrivate()||publicKey.getFingerprint()!==data.fingerprint||backup.getFingerprint()!==data.fingerprint||backup.isDecrypted())fail(400,'密钥指纹不匹配或私钥备份未加密');
+      const date=verificationDate();await publicKey.getEncryptionKey(undefined,date);await publicKey.getSigningKey(undefined,date);
+    } catch {fail(400,'密钥无效，或私钥备份未加密');}
+    await verifyDetached({v:1,serverId,userId,fingerprint:data.fingerprint},data.proof,publicKey);
+    return {userId,fingerprint:data.fingerprint,publicKey:data.publicKey,encryptedPrivateKey:data.encryptedPrivateKey};
+  }
+  async function checkAccountPassword(req,userId,value) {
+    limited(req,'password-proof',20);limitKey(`password-proof-user:${userId}`,20,15*60*1000);
+    const row=q('SELECT password_hash FROM users WHERE id=?',userId);
+    if(!row||!(await verifyPassword(value,row.password_hash)))fail(403,'账户密码不正确');
+    return row.password_hash;
+  }
+  function checkAccountState(auth,passwordHash,res) {
+    const fresh=q('SELECT u.password_hash FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?',auth.user.id,auth.tokenHash,Date.now());
+    if(closing||res.destroyed||!fresh||fresh.password_hash!==passwordHash)fail(409,'账户登录状态已变化，请重新登录后再试');
+  }
   function manifestJson(row) { return { payload: JSON.parse(row.payload), signature: row.signature }; }
   async function verifyDetached(payload, signature, publicKey) {
     if (typeof signature !== 'string' || signature.length > 16000 || !signature.startsWith('-----BEGIN PGP SIGNATURE-----')) fail(400, '数字签名格式不正确');
@@ -363,6 +404,15 @@ function createApplication(options = {}) {
     if (!row || row.expires_at <= Date.now()) { if (row) { run('DELETE FROM sessions WHERE token_hash=?', tokenHash); closeSessionEvents(tokenHash); } fail(401, '登录已过期，请重新登录'); }
     return { user: userJson(row), tokenHash, expiresAt: row.expires_at };
   }
+  function renewSession(req,res,auth) {
+    // Keep a device active without repeatedly rewriting its cookie or minting a
+    // new token. Explicit logout/password revocation still deletes the session.
+    if(auth.expiresAt-Date.now()>Math.min(7*24*3600*1000,sessionTtl/4))return;
+    const stamp=Date.now(),expiresAt=stamp+sessionTtl;
+    const result=run('UPDATE sessions SET expires_at=? WHERE token_hash=? AND user_id=? AND expires_at>?',expiresAt,auth.tokenHash,auth.user.id,stamp);
+    if(!result.changes)return;
+    auth.expiresAt=expiresAt;setCookie(req,res,cookieToken(req),Math.max(1,Math.floor(sessionTtl/1000)));
+  }
   function setCookie(req, res, token, maxAge) {
     const secure = req.socket.encrypted || (trustProxy && req.headers['x-forwarded-proto'] === 'https');
     res.setHeader('Set-Cookie', `yueti_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`);
@@ -401,7 +451,7 @@ function createApplication(options = {}) {
     const pathname = url.pathname, method = req.method;
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) checkMutation(req);
     if (method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, version: VERSION });
-    if (method === 'GET' && pathname === '/api/bootstrap') return json(res, 200, { needsSetup: !q('SELECT 1 FROM users LIMIT 1'), registrationOpen: false, aiEnabled: aiConfig().enabled, serverInstanceId: serverId, e2eeRequired: true, friendshipRequired: true, sharedAIDirect: true, sharedSearchDirect: true, chunkedAttachments:true, version: VERSION });
+    if (method === 'GET' && pathname === '/api/bootstrap') return json(res, 200, { needsSetup: !q('SELECT 1 FROM users LIMIT 1'), registrationOpen: false, aiEnabled: aiConfig().enabled, serverInstanceId: serverId, e2eeRequired: true, friendshipRequired: true, sharedAIDirect: true, sharedSearchDirect: true, chunkedAttachments:true,passwordAccess:true,archiveRecovery:true, version: VERSION });
     if (method === 'POST' && pathname === '/api/setup') {
       limited(req, 'setup', 10);
       const data = await body(req), values = accountValues(data);
@@ -436,6 +486,9 @@ function createApplication(options = {}) {
     }
     const auth = session(req), user = auth.user;
     if (req.headers['x-yueti-user'] !== undefined && req.headers['x-yueti-user'] !== user.id) fail(409, '账户已在其他窗口切换，请刷新后重试');
+    // The Android background notification transport does not store Set-Cookie
+    // headers. Do not let it consume a renewal intended for the foreground UI.
+    if(!['/api/auth/logout','/api/events','/api/notifications'].includes(pathname))renewSession(req,res,auth);
     if (method === 'GET' && pathname === '/api/ai/shared') {
       if (url.search) fail(400, 'AI 配置接口不接收正文或查询参数');
       return json(res, 200, sharedAi.view(user.id, aiConfig().mode === 'shared_direct'));
@@ -445,43 +498,98 @@ function createApplication(options = {}) {
       if (method === 'GET') return json(res, 200, privateAiMemory.view(user.id));
       if (method === 'PUT') {
         limitKey(`ai-memory:${user.id}`, 120, 60000);
+        const fingerprint=q('SELECT fingerprint FROM identities WHERE user_id=?',user.id)?.fingerprint;
         const data = await privateAiMemory.validate(await body(req, 280 * 1024));
         if (res.destroyed || !q('SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?', auth.tokenHash, user.id, Date.now())) fail(409, '长期记忆修改已取消');
-        return json(res, 200, transaction(() => privateAiMemory.commit(user.id, data)));
+        return json(res, 200, transaction(() => {
+          if(!fingerprint||q('SELECT fingerprint FROM identities WHERE user_id=?',user.id)?.fingerprint!==fingerprint)fail(409,'长期记忆对应的加密身份已变化');
+          return privateAiMemory.commit(user.id,data);
+        }));
       }
       fail(405, '长期记忆仅支持读取或保存加密版本');
     }
+    if (pathname === '/api/e2ee/password-access') {
+      if(url.search)fail(400,'密码保护的加密密钥仅限当前账户');
+      if(method==='GET')return json(res,200,passwordAccess.view(user.id));
+      if(method==='PUT') {
+        const data=await body(req,32*1024);exactKeys(data,['password','access','proof'],'密码保护的加密密钥');
+        const passwordHash=await checkAccountPassword(req,user.id,data.password);
+        const validated=await passwordAccess.validate(user.id,currentIdentity(user.id),data.access,data.proof);
+        return json(res,200,transaction(()=>{checkAccountState(auth,passwordHash,res);return passwordAccess.provision(validated);}));
+      }
+      fail(405,'不支持的密码保护操作');
+    }
+    if (pathname === '/api/e2ee/archived-identities') {
+      if (method !== 'GET') fail(405, '历史加密身份只能由本账户读取');
+      if (url.search) fail(400, '历史加密身份仅限当前账户');
+      // Never publish archived private-key backups in the contact directory.
+      // The encrypted backup can be unlocked only by the original code locally.
+      const identities=all('SELECT * FROM historical_identities WHERE user_id=? ORDER BY archived_at DESC,fingerprint',user.id).map(row=>({...identityJson(row,true),proof:row.proof,archivedAt:row.archived_at}));
+      return json(res,200,{identities});
+    }
     if (pathname === '/api/e2ee/identity') {
-      if (method === 'GET') return json(res, 200, { identity: identityJson(q('SELECT * FROM identities WHERE user_id=?', user.id), true) });
+      if (method === 'GET') {const history=previousFingerprints(user.id);return json(res,200,{identity:currentIdentity(user.id),...(history.length?{previousFingerprints:history}:{})});}
       if (method === 'POST') {
         limited(req, 'identity', 20);
         const data = await body(req, 160 * 1024);
-        exactKeys(data, ['userId', 'fingerprint', 'publicKey', 'encryptedPrivateKey', 'proof'], '加密身份');
-        if (data.userId !== user.id || typeof data.fingerprint !== 'string' || !/^[a-f0-9]{40,64}$/.test(data.fingerprint)) fail(400, '加密身份不属于当前用户');
-        if (typeof data.publicKey !== 'string' || data.publicKey.length > 64000 || !data.publicKey.startsWith('-----BEGIN PGP PUBLIC KEY BLOCK-----') || typeof data.encryptedPrivateKey !== 'string' || data.encryptedPrivateKey.length > 80000 || !data.encryptedPrivateKey.startsWith('-----BEGIN PGP PRIVATE KEY BLOCK-----')) fail(400, '公钥或加密备份格式不正确');
-        let publicKey;
-        try {
-          const pgp = await openpgpReady;
-          publicKey = await pgp.readKey({ armoredKey: data.publicKey });
-          const backup = await pgp.readPrivateKey({ armoredKey: data.encryptedPrivateKey });
-          if (publicKey.isPrivate() || publicKey.getFingerprint() !== data.fingerprint || backup.getFingerprint() !== data.fingerprint || backup.isDecrypted()) fail(400, '密钥指纹不匹配或私钥备份未加密');
-          const date = verificationDate();
-          await publicKey.getEncryptionKey(undefined, date); await publicKey.getSigningKey(undefined, date);
-        } catch { fail(400, '密钥无效，或私钥备份未加密'); }
-        await verifyDetached({ v: 1, serverId, userId: user.id, fingerprint: data.fingerprint }, data.proof, publicKey);
-        const existing = q('SELECT * FROM identities WHERE user_id=?', user.id);
-        if (existing) {
-          if (canonical(identityJson(existing, true)) !== canonical({ userId: data.userId, fingerprint: data.fingerprint, publicKey: data.publicKey, encryptedPrivateKey: data.encryptedPrivateKey })) fail(409, '此账户已绑定加密身份，禁止覆盖或静默换钥');
-          return json(res, 200, { identity: identityJson(existing, true) });
-        }
-        run('INSERT INTO identities(user_id,fingerprint,public_key,encrypted_private_key,proof,created_at) VALUES(?,?,?,?,?,?)', user.id, data.fingerprint, data.publicKey, data.encryptedPrivateKey, data.proof, now());
-        sendEvent(); return json(res, 201, { identity: identityJson(q('SELECT * FROM identities WHERE user_id=?', user.id), true) });
+        const wrapped=['password','access','accessProof'].some(key=>Object.hasOwn(data,key));
+        const {password,access,accessProof,...identityData}=data;
+        exactKeys(data,['userId','fingerprint','publicKey','encryptedPrivateKey','proof',...(wrapped?['password','access','accessProof']:[])],'加密身份');
+        const passwordHash=wrapped?await checkAccountPassword(req,user.id,password):null;
+        const identity=await verifyIdentity(identityData,user.id),validated=wrapped?await passwordAccess.validate(user.id,identity,access,accessProof):null;
+        const result=transaction(()=>{
+          if(wrapped)checkAccountState(auth,passwordHash,res);
+          else if(!q('SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?',auth.tokenHash,user.id,Date.now())||res.destroyed)fail(409,'账户登录状态已变化');
+          const existing=currentIdentity(user.id);
+          if(existing&&canonical(existing)!==canonical(identity))fail(409,'此账户已绑定加密身份，禁止覆盖或静默换钥');
+          if(!existing)run('INSERT INTO identities(user_id,fingerprint,public_key,encrypted_private_key,proof,created_at) VALUES(?,?,?,?,?,?)',user.id,data.fingerprint,data.publicKey,data.encryptedPrivateKey,data.proof,now());
+          return {created:!existing,response:{identity,...(wrapped?passwordAccess.provision(validated):{})}};
+        });
+        if(result.created)sendEvent();return json(res,result.created?201:200,result.response);
       }
+    }
+    if(method==='POST'&&pathname==='/api/e2ee/identity/reset') {
+      if(url.search)fail(400,'仅限重设当前账户的加密身份');
+      const data=await body(req,160*1024);exactKeys(data,['password','previousFingerprint','identity','access','proof'],'加密身份重设');
+      const passwordHash=await checkAccountPassword(req,user.id,data.password);
+      const previous=currentIdentity(user.id);
+      if(!previous||previous.fingerprint!==data.previousFingerprint||passwordAccess.row(user.id))fail(409,'仅尚未启用密码保护的旧账户可以重设加密身份');
+      const identity=await verifyIdentity(data.identity,user.id),validated=await passwordAccess.validate(user.id,identity,data.access,data.proof);
+      if(identity.fingerprint===previous.fingerprint||previousFingerprints(user.id).includes(identity.fingerprint))fail(400,'重设必须建立新的加密身份');
+      const result=transaction(()=>{
+        checkAccountState(auth,passwordHash,res);
+        const old=q('SELECT * FROM identities WHERE user_id=?',user.id);
+        if(!old||canonical(identityJson(old,true))!==canonical(previous)||passwordAccess.row(user.id))fail(409,'账户加密身份已更新，请重新登录');
+        // Preserve the old encrypted key and all signed messages. Existing
+        // memberships remain readable; replacement conversations start fresh.
+        run('INSERT INTO historical_identities(user_id,fingerprint,public_key,encrypted_private_key,proof,created_at,archived_at) VALUES(?,?,?,?,?,?,?)',old.user_id,old.fingerprint,old.public_key,old.encrypted_private_key,old.proof,old.created_at,now());
+        const archivedChats=[];
+        for(const chat of all('SELECT c.* FROM chats c JOIN members me ON me.chat_id=c.id WHERE me.user_id=? AND NOT EXISTS(SELECT 1 FROM chat_archives a WHERE a.chat_id=c.id)',user.id)) {
+          const members=all('SELECT * FROM members WHERE chat_id=?',chat.id);
+          run('UPDATE chats SET direct_key=NULL WHERE id=?',chat.id);
+          const successor=makeChat(chat.kind,chat.name,chat.owner_id,members.filter(m=>m.user_id!=='ai').map(m=>m.user_id),chat.direct_key,members.some(m=>m.user_id==='ai'));
+          run('UPDATE chats SET context=? WHERE id=?',chat.context,successor.id);
+          for(const member of members)run('UPDATE members SET pinned=?,muted=? WHERE chat_id=? AND user_id=?',member.pinned,member.muted,successor.id,member.user_id);
+          run('INSERT INTO chat_archives(chat_id,successor_id,reset_user_id,archived_at) VALUES(?,?,?,?)',chat.id,successor.id,user.id,now());
+          archivedChats.push({id:chat.id,successorId:successor.id});
+        }
+        run('INSERT INTO ai_private_memory_archive(user_id,fingerprint,revision,ciphertext,ciphertext_hash,updated_at,archived_at) SELECT user_id,?,revision,ciphertext,ciphertext_hash,updated_at,? FROM ai_private_memories WHERE user_id=?',old.fingerprint,now(),user.id);
+        run('DELETE FROM ai_private_memories WHERE user_id=?',user.id);
+        run('UPDATE identities SET fingerprint=?,public_key=?,encrypted_private_key=?,proof=?,created_at=? WHERE user_id=?',identity.fingerprint,identity.publicKey,identity.encryptedPrivateKey,data.identity.proof,now(),user.id);
+        const wrapped=passwordAccess.provision(validated);
+        const revoked=all('SELECT token_hash FROM sessions WHERE user_id=? AND token_hash<>?',user.id,auth.tokenHash);
+        run('DELETE FROM sessions WHERE user_id=? AND token_hash<>?',user.id,auth.tokenHash);
+        return {identity,...wrapped,archivedChats,revoked};
+      });
+      for(const row of result.revoked)closeSessionEvents(row.token_hash);
+      await aiBroker.revokeUserExcept(user.id,auth.tokenHash);
+      for(const row of result.archivedChats)await aiBroker.revokeChat(row.id);
+      sendEvent();const {revoked,...response}=result;return json(res,201,response);
     }
     if (method === 'GET' && pathname === '/api/e2ee/keys') {
       const ids = (url.searchParams.get('ids') || '').split(',').filter(Boolean);
       if (ids.length > 100 || ids.some((value) => !/^[a-f0-9-]{36}$/.test(value))) fail(400, '公钥查询列表不正确');
-      return json(res, 200, { keys: [...new Set(ids)].filter(otherId => canReadIdentity(user, otherId)).map(otherId => identityJson(q('SELECT * FROM identities WHERE user_id=?', otherId))).filter(Boolean) });
+      return json(res,200,{keys:[...new Set(ids)].filter(otherId=>canReadIdentity(user,otherId)).map(otherId=>{const identity=identityJson(q('SELECT * FROM identities WHERE user_id=?',otherId));const history=previousFingerprints(otherId);return identity?{...identity,...(history.length?{previousFingerprints:history}:{})}:null;}).filter(Boolean)});
     }
     if (method === 'POST' && pathname === '/api/auth/logout') {
       run('DELETE FROM sessions WHERE token_hash=?', auth.tokenHash); closeSessionEvents(auth.tokenHash);
@@ -493,14 +601,29 @@ function createApplication(options = {}) {
       run('UPDATE users SET display_name=? WHERE id=?', displayName, user.id); sendEvent(); return json(res, 200, { user: getUser(user.id) });
     }
     if (method === 'POST' && pathname === '/api/auth/password') {
-      limited(req, 'password', 10); const data = await body(req); password(data.newPassword);
+      limited(req, 'password', 10); const data = await body(req,32*1024); password(data.newPassword);
+      const wrapped=Object.hasOwn(data,'access')||Object.hasOwn(data,'proof');
+      exactKeys(data,['currentPassword','newPassword',...(wrapped?['access','proof']:[])],'修改密码');
       const row = q('SELECT password_hash FROM users WHERE id=?', user.id);
       if (!(await verifyPassword(data.currentPassword, row.password_hash))) fail(403, '原密码不正确');
-      const hashed = await hashPassword(data.newPassword), revoked = all('SELECT token_hash FROM sessions WHERE user_id=? AND token_hash<>?', user.id, auth.tokenHash);
-      transaction(() => { run('UPDATE users SET password_hash=? WHERE id=?', hashed, user.id); run('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', user.id, auth.tokenHash); });
-      for (const row of revoked) closeSessionEvents(row.token_hash);
+      const prior=passwordAccess.row(user.id);
+      if(prior&&!wrapped)fail(409,'修改密码时必须重新保护聊天加密密钥，请使用新版客户端');
+      const validated=wrapped?await passwordAccess.validate(user.id,currentIdentity(user.id),data.access,data.proof):null;
+      const hashed = await hashPassword(data.newPassword);
+      const result=transaction(()=>{
+        checkAccountState(auth,row.password_hash,res);
+        const fresh=passwordAccess.row(user.id);
+        if((fresh?.revision||0)!==(prior?.revision||0))fail(409,'密码保护密钥已在其他设备更新，请重新登录');
+        if(fresh&&!validated)fail(409,'修改密码时必须重新保护聊天加密密钥');
+        const access=validated?passwordAccess.commit(validated,prior?.revision||0):{};
+        run('UPDATE users SET password_hash=? WHERE id=?',hashed,user.id);
+        const revoked=all('SELECT token_hash FROM sessions WHERE user_id=? AND token_hash<>?',user.id,auth.tokenHash);
+        run('DELETE FROM sessions WHERE user_id=? AND token_hash<>?',user.id,auth.tokenHash);
+        return {access,revoked};
+      });
+      for (const row of result.revoked) closeSessionEvents(row.token_hash);
       await aiBroker.revokeUserExcept(user.id,auth.tokenHash);
-      return json(res, 200, { ok: true });
+      return json(res,200,{ok:true,...result.access});
     }
     if (method === 'PUT' && pathname === '/api/me/avatar') {
       limited(req, 'avatar', 30); const data = await body(req, 3 * MB);
@@ -606,7 +729,7 @@ function createApplication(options = {}) {
       if (['ai', 'notes'].includes(data.kind) && memberIds.length) fail(400, '此会话不能添加其他用户');
       if (['direct', 'group'].includes(data.kind)) for (const memberId of memberIds) requireFriend(user.id, memberId);
       const key = data.kind === 'direct' ? [user.id, ...memberIds].sort().join(':') : ['notes', 'ai'].includes(data.kind) ? `${data.kind}:${user.id}` : null;
-      const existing = key ? q('SELECT * FROM chats WHERE direct_key=? OR (kind=? AND owner_id=? AND kind=\'notes\')', key, data.kind, user.id) : null;
+      const existing = key ? q('SELECT c.* FROM chats c WHERE (c.direct_key=? OR (c.kind=? AND c.owner_id=? AND c.kind=\'notes\')) AND NOT EXISTS(SELECT 1 FROM chat_archives a WHERE a.chat_id=c.id)', key, data.kind, user.id) : null;
       if (existing) return json(res, 200, { chat: chatJson(existing, user.id) });
       const name = data.kind === 'notes' ? '我的笔记' : data.kind === 'ai' ? '山岚' : data.kind === 'group' ? string(data.name || '新群聊', 80, '群聊名称') : '私聊';
       const chat = transaction(() => {
@@ -615,9 +738,18 @@ function createApplication(options = {}) {
       });
       refreshChat(chat.id); return json(res, 201, { chat: chatJson(chat, user.id) });
     }
-    if ((match = /^\/api\/chats\/([^/]+)(?:\/(messages|members|manifests|read|ai\/stop|ai\/relay|ai\/credential(?:\/[a-f0-9-]{36})?))?$/.exec(pathname))) {
+    if(await archiveAssist.handle(req,res,url,user,auth))return;
+    if ((match = /^\/api\/chats\/([^/]+)(?:\/(messages|members|manifests|keys|read|ai\/stop|ai\/relay|ai\/credential(?:\/[a-f0-9-]{36})?))?$/.exec(pathname))) {
       const chat = requireChat(match[1], user), action = match[2];
       if (method === 'GET' && action === 'manifests') return json(res, 200, { manifests: all('SELECT * FROM manifests WHERE chat_id=? ORDER BY revision', chat.id).map(manifestJson) });
+      if(method==='GET'&&action==='keys') {
+        if(url.search)fail(400,'只能读取当前会话的历史成员身份');
+        const members=all(`SELECT DISTINCT json_extract(entry.value,'$.userId') user_id,json_extract(entry.value,'$.fingerprint') fingerprint FROM manifests mf,json_each(mf.payload,'$.members') entry WHERE mf.chat_id=? LIMIT 10001`,chat.id);
+        if(members.length>10000)fail(409,'历史成员身份过多');
+        const keys=members.map(member=>identityJson(q('SELECT * FROM identities WHERE user_id=? AND fingerprint=?',member.user_id,member.fingerprint)||q('SELECT * FROM historical_identities WHERE user_id=? AND fingerprint=?',member.user_id,member.fingerprint)));
+        if(keys.some(key=>!key))fail(409,'会话历史公钥缺失，请恢复原服务器备份');
+        return json(res,200,{keys});
+      }
       if (method === 'PUT' && action === 'manifests') {
         if (chat.owner_id !== user.id) fail(403, '只有会话创建者可以签署成员变更');
         requireChatWrite(chat, user);
@@ -657,7 +789,7 @@ function createApplication(options = {}) {
       }
       if (method === 'PATCH' && !action) {
         const data = await body(req);
-        if (data.name !== undefined || data.context !== undefined) requireOwner(chat, user);
+        if (data.name !== undefined || data.context !== undefined) {requireOwner(chat,user);if(q('SELECT 1 FROM chat_archives WHERE chat_id=?',chat.id))fail(409,'旧加密会话仅可阅读');}
         let name;
         if (data.name !== undefined) { if (chat.kind !== 'group') fail(400, '只有群聊可以更名'); name = string(data.name, 80, '群聊名称'); }
         if (data.context !== undefined && !['recent', 'mention', 'none'].includes(data.context)) fail(400, 'AI 上下文范围不正确');
@@ -826,7 +958,7 @@ function createApplication(options = {}) {
             }));
             sendEvent(); return json(res, 200, adminAiConfig());
           }
-          if (sharedAi.currentMetadata()) fail(409, '共享 AI 配置必须由管理员在本机签署，不能使用未签名设置覆盖', { code: 'AI_SHARED_SIGNED_CONFIGURATION_REQUIRED' });
+          if (sharedAi.hasHistory()) fail(409, '共享 AI 配置必须由管理员在本机签署，不能使用未签名设置覆盖', { code: 'AI_SHARED_SIGNED_CONFIGURATION_REQUIRED' });
           if (typeof data.enabled !== 'boolean') fail(400, 'AI 开关不正确');
           const fields = ['enabled','mode','model','managementKey',...Object.keys(AI_BOUNDS)];
           if (Object.keys(data).some(key => !fields.includes(key)) || data.mode !== 'openrouter_direct') fail(400,'AI 已改为 OpenRouter 客户端直连，请升级设置界面并配置 Management API Key',{code:'AI_DIRECT_CONFIG_REQUIRED'});

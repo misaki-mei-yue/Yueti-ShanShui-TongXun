@@ -1,11 +1,11 @@
 {
   "name": "yueti-shanshui",
-  "version": "1.4.1",
-  "schema": 3,
+  "version": "1.5.1",
+  "schema": 5,
   "node": "24.21.0",
   "architectures": [
     "linux-x64",
     "linux-arm64"
   ],
-  "builtAt": "2026-10-16T11:24:37.341Z"
+  "builtAt": "2026-11-25T12:34:01.367Z"
 }

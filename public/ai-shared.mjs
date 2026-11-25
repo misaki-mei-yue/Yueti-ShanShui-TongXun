@@ -47,6 +47,42 @@ function validatePayload(box,p) {
   }
   if(!p.recipients.some(r=>r.userId===p.ownerId&&r.fingerprint===p.ownerFingerprint)) fail('AI 管理员身份不在授权清单中。');
 }
+function checkHistoryPin(pin,history,hashes) {
+  if(!pin)return;
+  const pinned=history[pin.revision-1]?.payload;
+  if(!pinned||pin.revision>history.length||pin.ownerId!==pinned.ownerId) fail('AI 管理员身份被替换或配置发生回退，已停止连接。');
+  if(pin.ownerFingerprint!==pinned.ownerFingerprint||hashes[pin.revision-1]!==pin.hash) fail('AI 配置发生分叉，已停止连接。');
+}
+
+async function verifiedChain(box,history,currentOwner,pin,epoch,signal) {
+  if(!Array.isArray(history)||!history.length||history.length>4096) fail('AI 配置历史不完整，已停止连接。');
+  const hashes=[],ids=new Set(),seenOwners=new Set(),signers=new Map([[currentOwner.fingerprint,currentOwner]]);
+  let previousHash=null,previousSigner=null;
+  for(let i=0;i<history.length;i++) {
+    const item=history[i],entry=item?.payload; validatePayload(box,entry);
+    if(entry.revision!==i+1||entry.previousHash!==previousHash||entry.ownerId!==currentOwner.userId||ids.has(entry.configId)||typeof item.signature!=='string'||item.signature.length>65536) fail('AI 配置签名链被修改，已停止连接。');
+    if(previousSigner!==entry.ownerFingerprint) {
+      if(seenOwners.has(entry.ownerFingerprint))fail('AI 管理员签名身份出现回退，已停止连接。');
+      seenOwners.add(entry.ownerFingerprint);previousSigner=entry.ownerFingerprint;
+    }
+    let signer=signers.get(entry.ownerFingerprint);
+    if(!signer) {
+      // A prior key may be used only for its own immutable signed revisions.
+      // It can never become the active owner simply because it appears here.
+      if(item.signer?.userId!==entry.ownerId||item.signer?.fingerprint!==entry.ownerFingerprint) fail('缺少 AI 原管理员的历史公钥，已停止连接。');
+      signer=await box.parseRecord(item.signer);signers.set(entry.ownerFingerprint,signer);
+    }
+    ids.add(entry.configId);
+    const result=await pgp.verify({message:await pgp.createMessage({text:canonical(entry)}),signature:await pgp.readSignature({armoredSignature:item.signature}),verificationKeys:signer.key});
+    if(result.signatures.length!==1) fail('AI 配置数字签名无效。');
+    await result.signatures[0].verified;
+    previousHash=await digest({payload:entry,signature:item.signature});
+    if(item.hash!==previousHash) fail('AI 配置历史校验失败。');
+    hashes.push(previousHash); check(box,epoch,signal);
+  }
+  checkHistoryPin(pin,history,hashes);return hashes;
+}
+
 async function verifiedHistory(box,configuration,history,approveTrust,epoch,signal) {
   check(box,epoch,signal);
   validatePayload(box,configuration?.payload);
@@ -55,25 +91,13 @@ async function verifiedHistory(box,configuration,history,approveTrust,epoch,sign
   if(!Array.isArray(history)||history.length!==p.revision||history.length>4096) fail('AI 配置历史不完整，已停止连接。');
   const storageKey=box.scope+'ai-config-pin',pin=await box.storage.get(storageKey);
   check(box,epoch,signal);
-  if(pin&&(pin.ownerId!==p.ownerId||pin.ownerFingerprint!==p.ownerFingerprint||pin.revision>p.revision)) fail('AI 管理员身份被替换或配置发生回退，已停止连接。');
+  if(pin&&(pin.ownerId!==p.ownerId||pin.revision>p.revision)) fail('AI 管理员身份被替换或配置发生回退，已停止连接。');
   const [owner]=await cancellable(box.getRecords([p.ownerId],trustCallback(box,epoch,signal,approveTrust)),signal);
   check(box,epoch,signal);
   if(owner.fingerprint!==p.ownerFingerprint) fail('AI 管理员签名身份不匹配。');
-  const hashes=[],ids=new Set(); let previousHash=null;
-  for(let i=0;i<history.length;i++) {
-    const item=history[i],entry=item?.payload; validatePayload(box,entry);
-    if(entry.revision!==i+1||entry.previousHash!==previousHash||entry.ownerId!==p.ownerId||entry.ownerFingerprint!==p.ownerFingerprint||ids.has(entry.configId)||typeof item.signature!=='string'||item.signature.length>65536) fail('AI 配置签名链被修改，已停止连接。');
-    ids.add(entry.configId);
-    const result=await pgp.verify({message:await pgp.createMessage({text:canonical(entry)}),signature:await pgp.readSignature({armoredSignature:item.signature}),verificationKeys:owner.key});
-    if(result.signatures.length!==1) fail('AI 配置数字签名无效。');
-    await result.signatures[0].verified;
-    previousHash=await digest({payload:entry,signature:item.signature});
-    if(item.hash!==previousHash) fail('AI 配置历史校验失败。');
-    hashes.push(previousHash); check(box,epoch,signal);
-  }
+  const hashes=await verifiedChain(box,history,owner,pin,epoch,signal);
   const last=history.at(-1);
   if(!same(last.payload,p)||last.signature!==configuration.signature||await digest(configuration.ciphertext)!==p.ciphertextHash) fail('AI 加密配置被修改，已停止连接。');
-  if(pin&&hashes[pin.revision-1]!==pin.hash) fail('AI 配置发生分叉，已停止连接。');
   const self=p.recipients.find(r=>r.userId===box.user.id);
   if(!self||self.fingerprint!==box.fingerprint) fail('此账户尚未获准使用 AI，请联系管理员授权。');
   check(box,epoch,signal);
@@ -96,14 +120,15 @@ export async function unlockSharedAIConfiguration(box,{configuration,history,app
   if(p.v>=2) { if(searchEnabled||secret.tavilyKey) validateAIKey(secret.tavilyKey); else if(secret.tavilyKey!=='') fail('Tavily Key 格式无效。'); }
   if(p.v===3) for(const name of ['vision','image']) { if(p[name].enabled||secret[name+'Key']) validateAIKey(secret[name+'Key']); else if(secret[name+'Key']!=='') fail('多模态模型 Key 无效。'); }
   check(box,epoch,signal);
-  if(!verified.pin||verified.pin.baseUrl!==p.baseUrl) {
+  const signerChanged=verified.pin&&verified.pin.ownerFingerprint!==p.ownerFingerprint;
+  if(!verified.pin||verified.pin.baseUrl!==p.baseUrl||signerChanged) {
     if(!approveEndpoint||!await cancellable(Promise.resolve(approveEndpoint({baseUrl:p.baseUrl,model:p.model,revision:p.revision,previousBaseUrl:verified.pin?.baseUrl||null})),signal)) fail('尚未确认 AI 接口，已停止连接。');
     check(box,epoch,signal);
   }
   const profileEndpoints={};
   if(p.v===3) for(const name of ['vision','image']) if(p[name].enabled) {
     const endpoint=p[name].baseUrl, prior=verified.pin?.profileEndpoints?.[name];
-    if(endpoint!==p.baseUrl&&endpoint!==prior) {
+    if(endpoint!==p.baseUrl&&(endpoint!==prior||signerChanged)) {
       if(!approveEndpoint||!await cancellable(Promise.resolve(approveEndpoint({baseUrl:endpoint,model:p[name].model,capability:name,revision:p.revision,previousBaseUrl:prior||null})),signal)) fail('尚未确认多模态模型接口，已停止连接。');
       check(box,epoch,signal);
     }
@@ -112,7 +137,7 @@ export async function unlockSharedAIConfiguration(box,{configuration,history,app
   const newPin={revision:p.revision,hash:verified.hashes.at(-1),ownerId:p.ownerId,ownerFingerprint:p.ownerFingerprint,baseUrl:p.baseUrl,profileEndpoints};
   const pinCheck=prior=>{
     check(box,epoch,signal);
-    if(prior&&(prior.revision>p.revision||prior.ownerId!==p.ownerId||prior.ownerFingerprint!==p.ownerFingerprint||verified.hashes[prior.revision-1]!==prior.hash)) fail('AI 配置回退或分叉，已停止连接。');
+    checkHistoryPin(prior,history,verified.hashes);
     return {value:true,write:newPin};
   };
   if(box.storage.checkedWrite) await box.storage.checkedWrite(verified.storageKey,pinCheck);
@@ -142,7 +167,17 @@ export async function createSharedAIConfiguration(box,{baseUrl,model,key,enabled
     if(previousConfiguration.payload.ownerId!==box.user.id||previousConfiguration.payload.ownerFingerprint!==box.fingerprint) fail('AI 原管理员身份不匹配。');
     revision=previousConfiguration.payload.revision+1;
     previousHash=await digest({payload:previousConfiguration.payload,signature:previousConfiguration.signature});
-  } else if(history.length || await box.storage.get(box.scope+'ai-config-pin')) fail('原有 AI 配置记录缺失，请恢复服务器数据后再设置。');
+  } else if(history.length) {
+    // After explicit account identity reset the last encrypted provider grant
+    // is unusable. Begin a new grant with the password-authenticated new key
+    // while preserving and verifying every previous revision and local pin.
+    const head=history.at(-1)?.payload,pin=await box.storage.get(box.scope+'ai-config-pin');
+    if(head?.ownerId!==box.user.id||head.ownerFingerprint===box.fingerprint) fail('原有 AI 配置记录缺失，请恢复服务器数据后再设置。');
+    const [owner]=await cancellable(box.getRecords([box.user.id],trustCallback(box,epoch,signal,approveTrust)),signal);
+    if(owner.fingerprint!==box.fingerprint||history.some(entry=>entry.payload?.ownerFingerprint===box.fingerprint))fail('AI 管理员原签名身份不匹配。');
+    const hashes=await verifiedChain(box,history,owner,pin,epoch,signal);
+    revision=history.length+1;previousHash=hashes.at(-1);
+  } else if(await box.storage.get(box.scope+'ai-config-pin')) fail('原有 AI 配置记录缺失，请恢复服务器数据后再设置。');
   if(revision>4096) fail('AI 配置修订数量已达安全上限，请联系维护者。');
   if(!Array.isArray(recipientIds)||recipientIds.length>200) fail('AI 授权用户清单无效。');
   const ids=[...new Set([...recipientIds,box.user.id])].sort();

@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 umask 077
 # This installer manages only the independent yueti-shanshui application.
-VERSION='1.4.1'
-SCHEMA=3
-EXPECTED_SHA256='5f22a549be640c86011ccf1c348461a2ac29d19f6e40ae0f2e0aeec9914b1b3d'
+VERSION='1.5.1'
+SCHEMA=5
+EXPECTED_SHA256='b184e4675a42350f811a332cb93ee4e06a17cecd4f282544547a630f503d7a4f'
 SERVICE='yueti-shanshui'
 APP_ROOT='/opt/shanshui'
 DATA_DIR='/opt/shanshui/data'
@@ -12,7 +12,7 @@ CONFIG_DIR='/opt/shanshui/config'
 BACKUP_ROOT='/opt/shanshui/backups'
 ENV_FILE="$CONFIG_DIR/.env"
 UNIT='/etc/systemd/system/yueti-shanshui.service'
-PACKAGE="${1:-$(dirname "$(readlink -f "$0")")/YuetiShanShui-1.4.1-server.tar.gz}"
+PACKAGE="${1:-$(dirname "$(readlink -f "$0")")/YuetiShanShui-1.5.1-server.tar.gz}"
 STAGE=''
 BACKUP=''
 PREVIOUS=''
@@ -66,7 +66,7 @@ find "$STAGE" -type f -exec chmod 644 {} +
 chmod 755 "$STAGE/runtimes/linux-$ARCH/bin/node"
 ln -s "runtimes/linux-$ARCH/bin/node" "$STAGE/node"
 "$STAGE/node" -e 'const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync(":memory:");d.exec("CREATE TABLE ok(id INTEGER)");d.close()' 2>/dev/null || die '运行时不能在此系统启动。需 glibc 2.28+，请使用现代 Ubuntu / Debian / RHEL 系统。'
-"$STAGE/node" -e 'const r=require(process.argv[1]);if(r.version!=="1.4.1"||r.schema!==3)process.exit(1)' "$STAGE/release.json" || die '版本或数据库格式不匹配。'
+"$STAGE/node" -e 'const r=require(process.argv[1]);if(r.version!=="1.5.1"||r.schema!==5)process.exit(1)' "$STAGE/release.json" || die '版本或数据库格式不匹配。'
 if [[ -L "$APP_ROOT/current" ]]; then PREVIOUS=$(readlink -f "$APP_ROOT/current"); [[ "$PREVIOUS" == "$APP_ROOT/releases/"* ]] || die 'current 指向了山水版本目录之外，已停止。'; fi
 if [[ -e "$APP_ROOT/current" && ! -L "$APP_ROOT/current" ]]; then die 'current 已存在且不是版本链接，已停止。'; fi
 if systemctl is-active --quiet "$SERVICE"; then WAS_ACTIVE=1; fi

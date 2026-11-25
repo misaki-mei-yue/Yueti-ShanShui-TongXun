@@ -1,5 +1,5 @@
 import * as pgp from './vendor/openpgp.min.mjs';
-import { canonical, digest } from './e2ee.mjs';
+import { canonical, digest, wipeSessionKeys } from './e2ee.mjs';
 
 export const ATTACHMENT_FORMAT='pgp-chunks-v1';
 export const ATTACHMENT_CHUNK_SIZE=4*1024*1024;
@@ -18,6 +18,7 @@ function chunkHeader(box,chat,meta,index,previousHash) {
 // arrayBuffer on the sending device or one HTTP request on the server.
 export async function uploadAttachment({box,api=box.api,chat,file,approveTrust,signal,onProgress}) {
   box.requireReady(); const epoch=box.epoch;
+  if(chat.archived)fail('旧会话已经归档，不能发送新附件。');
   if(!file||!Number.isSafeInteger(file.size)||file.size<0||typeof file.slice!=='function') fail('附件信息无效。');
   const manifest=await box.prepareChat(chat,approveTrust);guard(box,epoch,signal);
   const meta={id:crypto.randomUUID(),format:ATTACHMENT_FORMAT,name:String(file.name||'附件').slice(0,255),mime:String(file.type||'application/octet-stream').slice(0,128),size:file.size,chunkSize:ATTACHMENT_CHUNK_SIZE,chunkCount:Math.max(1,Math.ceil(file.size/ATTACHMENT_CHUNK_SIZE)),manifestHash:await digest(manifest),sha256:EMPTY_HASH};
@@ -61,15 +62,18 @@ export async function uploadAttachment({box,api=box.api,chat,file,approveTrust,s
 export async function* iterateAttachment({box,api=box.api,chat,message,signal,onProgress}) {
   const payload=await box.verifiedPayload(chat,message), meta=payload.file,epoch=box.epoch;
   if(!validDescriptor(meta)) fail('分块附件信息无效。');
-  const sender=box.records.get(message.senderId);let previous=EMPTY_HASH,loaded=0;
+  const sender=box.recordFor(message.senderId,message.envelope.senderFingerprint);let previous=EMPTY_HASH,loaded=0;
   for(let index=0;index<meta.chunkCount;index++) {
     guard(box,epoch,signal);
     const cipher=await api(`/api/files/${encodeURIComponent(meta.id)}/chunks/${index}`,{response:'bytes',signal});
     if(!(cipher instanceof Uint8Array)||!cipher.length||cipher.length>MAX_CIPHER_CHUNK) fail('附件分块大小无效。');
     const hash=await digest(cipher);let result,plain;
     try {
-      result=await pgp.decrypt({message:await pgp.readMessage({binaryMessage:cipher}),decryptionKeys:box.privateKey,verificationKeys:sender.key,expectSigned:true,format:'binary',config:{maxDecompressedMessageSize:ATTACHMENT_CHUNK_SIZE+65536}});
-      if(result.signatures.length!==1) fail('附件发送者签名无效。');await result.signatures[0].verified;
+      const options=await box.decryptionOptionsFor(chat,message,cipher,{part:'chunk',index});
+      try {
+        guard(box,epoch,signal);result=await pgp.decrypt({message:await pgp.readMessage({binaryMessage:cipher}),...options,verificationKeys:sender.key,expectSigned:true,format:'binary',config:{maxDecompressedMessageSize:ATTACHMENT_CHUNK_SIZE+65536}});
+        if(result.signatures.length!==1) fail('附件发送者签名无效。');await result.signatures[0].verified;
+      } finally {wipeSessionKeys(options);}
       const packed=result.data;if(!(packed instanceof Uint8Array)||packed.length<4) fail('附件分块格式无效。');
       const length=new DataView(packed.buffer,packed.byteOffset,packed.byteLength).getUint32(0);if(length>16384||4+length>packed.length) fail('附件分块头无效。');
       let header;try {header=JSON.parse(decoder.decode(packed.subarray(4,4+length)));} catch {fail('附件分块头无效。');}

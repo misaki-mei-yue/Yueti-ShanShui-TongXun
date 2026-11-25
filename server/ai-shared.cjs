@@ -17,9 +17,25 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) fail(400, `${label}格式不正确`);
   };
   function currentRow() { return q('SELECT * FROM ai_shared_configurations ORDER BY revision DESC LIMIT 1'); }
-  function configuration(row = currentRow()) { return row ? { payload: JSON.parse(row.payload), signature: row.signature, ciphertext: row.ciphertext } : null; }
-  function history() { return all('SELECT payload,signature,config_hash FROM ai_shared_configurations ORDER BY revision').map(row => ({ payload: JSON.parse(row.payload), signature: row.signature, hash: row.config_hash })); }
-  function currentMetadata() { const row = currentRow(); return row ? JSON.parse(row.payload) : null; }
+  function activeRow() {
+    const row = currentRow();
+    if (!row) return null;
+    const p = JSON.parse(row.payload), current = q('SELECT fingerprint FROM identities WHERE user_id=?', p.ownerId);
+    // A reset does not erase the original signed chain or disclose its old key.
+    return current?.fingerprint === p.ownerFingerprint ? row : null;
+  }
+  function configuration(row = activeRow()) { return row ? { payload: JSON.parse(row.payload), signature: row.signature, ciphertext: row.ciphertext } : null; }
+  function historicalSigner(payload) {
+    return q('SELECT user_id AS userId,fingerprint,public_key AS publicKey FROM historical_identities WHERE user_id=? AND fingerprint=?', payload.ownerId, payload.ownerFingerprint);
+  }
+  function history() { return all('SELECT payload,signature,config_hash FROM ai_shared_configurations ORDER BY revision').map(row => {
+    const payload = JSON.parse(row.payload);
+    const current = q('SELECT fingerprint FROM identities WHERE user_id=?', payload.ownerId);
+    const signer = current?.fingerprint === payload.ownerFingerprint ? null : historicalSigner(payload);
+    return { payload, signature: row.signature, hash: row.config_hash, ...(signer ? { signer } : {}) };
+  }); }
+  function hasHistory() { return !!currentRow(); }
+  function currentMetadata() { const row = activeRow(); return row ? JSON.parse(row.payload) : null; }
   function validateBaseUrl(value, serverOrigin) {
     if (typeof value !== 'string' || value.length > 500) fail(400, 'AI 接口地址格式不正确');
     let url; try { url = new URL(value); } catch { fail(400, 'AI 接口地址格式不正确'); }
@@ -64,7 +80,15 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     validateMetadata(signed.payload, adminId);
     const previous = currentRow();
     if (previous && previous.config_id === signed.payload.configId && previous.config_hash === hash && previous.ciphertext === signed.ciphertext) return;
-    if (previous && (JSON.parse(previous.payload).ownerId !== signed.payload.ownerId || JSON.parse(previous.payload).ownerFingerprint !== signed.payload.ownerFingerprint)) fail(409, '共享 AI 配置的签署管理员不能更换', { code: 'AI_SHARED_OWNER_CHANGED' });
+    if (previous) {
+      const p = JSON.parse(previous.payload);
+      if (p.ownerId !== signed.payload.ownerId) fail(409, '共享 AI 配置的签署管理员不能更换', { code: 'AI_SHARED_OWNER_CHANGED' });
+      if (p.ownerFingerprint !== signed.payload.ownerFingerprint) {
+        // Only an explicitly archived previous identity can start the next
+        // generation. Continue the same increasing hash chain, never replace it.
+        if (!historicalSigner(p) || q("SELECT 1 FROM ai_shared_configurations WHERE json_extract(payload,'$.ownerFingerprint')=?", signed.payload.ownerFingerprint)) fail(409, '共享 AI 配置的签署管理员不能更换', { code: 'AI_SHARED_OWNER_CHANGED' });
+      }
+    }
     if (previous?.revision >= 4096) fail(409, '共享 AI 配置历史已达到 4096 次上限，请联系开发者处理；当前配置继续有效', { code: 'AI_SHARED_HISTORY_FULL' });
     if (signed.payload.revision !== (previous?.revision || 0) + 1 || signed.payload.previousHash !== (previous?.config_hash || null)) fail(409, 'AI 配置已经更新，请刷新后重新签署', { code: 'AI_SHARED_CONFIGURATION_CHANGED' });
     if (q('SELECT 1 FROM ai_shared_configurations WHERE config_id=?', signed.payload.configId)) fail(409, 'AI 配置标识已经使用，不能重新发布');
@@ -78,6 +102,6 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     const payload = currentMetadata(), granted = !!payload && authorized(userId);
     return { mode: active ? 'shared_direct' : null, enabled: !!(active && granted && payload.enabled), authorized: !!(active && granted), pending: !!(active && !granted), configuration: active && granted ? configuration() : null, history: active && granted ? history() : [] };
   }
-  return { validate, commit, configuration, history, currentMetadata, authorized, view };
+  return { validate, commit, configuration, history, hasHistory, currentMetadata, authorized, view };
 }
 module.exports = { createSharedConfigurationStore, MAX_RECIPIENTS };

@@ -52,7 +52,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     return {code:value.code,...(Number.isInteger(value.upstreamStatus) && value.upstreamStatus >= 100 && value.upstreamStatus <= 599 ? {upstreamStatus:value.upstreamStatus} : {}),...(typeof value.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value.requestId) ? {requestId:value.requestId} : {})};
   }
   let user = null, chats = [], current = null, filter = 'all', epoch = 0, selection = 0, dialogVersion = 0, chatRevision = 0;
-  let cryptoBox = null, serverId = '', persistTimer, persistVersion = 0, persistCommitted = 0, restoreVersion = 0, vaultVersion = 0, securityResolve = null, trustResolve = null, restoring = false, securityTransition = false;
+  let cryptoBox = null, serverId = '', archiveRecoveryAvailable = false, persistTimer, persistVersion = 0, persistCommitted = 0, restoreVersion = 0, vaultVersion = 0, securityResolve = null, trustResolve = null, restoring = false, securityTransition = false;
   const objectURLs = new Set(), aiJobs = new Map(), transfers = new Set();
   const outgoingJobs = new Map();
   const aiPreparing = new Set(), aiStates = new Map();
@@ -71,8 +71,8 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   const normalizeChat = c => ({...c,id:String(c.id),members:(c.members || []).map(u => ({...u,id:String(u.id)}))});
   const normalizeMessage = m => ({...m,id:String(m.id),chatId:String(m.chatId),senderId:String(m.senderId)});
   function upsertChat(value) { const c = normalizeChat(value); chatRevision++; chats = [...chats.filter(old => old.id !== c.id),c]; renderList(); return c; }
-  const isAI = c => c && (c.kind === 'ai' || c.kind === 'direct' || c.members.some(m => m.id === 'ai'));
-  const canEdit = c => c && String(c.ownerId) === user?.id;
+  const isAI = c => c && !c.archived && (c.kind === 'ai' || c.kind === 'direct' || c.members.some(m => m.id === 'ai'));
+  const canEdit = c => c && !c.archived && String(c.ownerId) === user?.id;
   const friendshipBlocked = c => c?.kind === 'direct' && c.canMessage !== true;
   const directPeer = c => c?.members.find(member => member.id !== user?.id && member.id !== 'ai');
   function toast(value) { $('toast').textContent = value; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; },4500); }
@@ -172,8 +172,8 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       let result;
       if(response.ok&&options.response==='bytes') {
         const reader=response.body?.getReader();if(!reader)throw new Error('附件没有返回内容。');
-        const parts=[];let length=0;
-        try { for(;;){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>8*1024*1024){await reader.cancel();throw new Error('附件分块格式无效。');}parts.push(value);}result=new Uint8Array(length);let offset=0;for(const part of parts){result.set(part,offset);offset+=part.byteLength;} }
+        const parts=[];let length=0;const maxBytes=Number.isSafeInteger(options.maxBytes)?Math.max(1,Math.min(25*1024*1024,options.maxBytes)):8*1024*1024;
+        try { for(;;){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>maxBytes){await reader.cancel();throw new Error('附件加密数据超过允许的大小。');}parts.push(value);}result=new Uint8Array(length);let offset=0;for(const part of parts){result.set(part,offset);offset+=part.byteLength;} }
         finally{for(const part of parts)part.fill(0);reader.releaseLock();}
       } else result = await response.json().catch(() => ({}));
       if (startEpoch !== epoch) throw Object.assign(new Error('账户已切换。'),{stale:true});
@@ -201,20 +201,28 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const link = document.createElement('a'); link.href = url; link.download = String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').slice(0,160) || '山水文件'; link.click();
     setTimeout(() => { URL.revokeObjectURL(url); objectURLs.delete(url); },60000);
   }
-  async function exportRecovery() {
-    if (!cryptoBox) throw new Error('请先登录并建立加密身份。');
-    const backup = await cryptoBox.exportBackup();
-    await saveBytes(JSON.stringify(backup,null,2),`山水通讯-加密恢复文件-${user.username}.json`,'application/json');
-  }
   const formatFingerprint = value => String(value || '').replace(/(.{4})/g,'$1 ').trim();
+  const changedTrustPeers=peers=>peers.filter(p=>p.changed===true||(p.previousFingerprint&&p.previousFingerprint!==p.fingerprint));
   function approveTrust(peers) {
-    if (!cryptoBox?.ready) return Promise.resolve(false);
+    return Promise.resolve(Boolean(cryptoBox?.ready&&!securityTransition&&!changedTrustPeers(peers).length));
+  }
+  // Review changed identities only when a user deliberately opens the warning.
+  function reviewTrust(peers) {
+    if (!cryptoBox?.ready || securityTransition) return Promise.resolve(false);
+    // First use pins the validated public key without asking the user to claim
+    // an out-of-band check that they have not performed. The selected audience
+    // and signed membership checks remain in CryptoBox. A changed pin is never
+    // accepted by this shortcut (including an unfamiliar historical key).
+    const changedPeers=changedTrustPeers(peers);
+    if(!changedPeers.length)return Promise.resolve(true);
+    const box=cryptoBox,generation=epoch,vault=vaultVersion;
     return new Promise(resolve => {
-      if (trustResolve) trustResolve(false); trustResolve = resolve;
-      const membership = peers.some(p => p.membership);
-      $('trust-content').innerHTML = `<h2 id="trust-title">${membership ? '确认加密成员' : '确认联系人的安全码'}</h2><p class="dialogcopy">${membership ? '你将作为群主签名确认以下实际收件人。请检查成员名单与完整安全码，之后发出的消息将只加密给这些成员。' : '请通过见面、电话或另一条可信渠道，与这些联系人核对完整安全码。服务器提供的公钥不能代替核对。'}</p>${peers.map(p => `<div class="security-code"><strong>${esc(p.displayName || person(p.userId)?.displayName || p.userId)}</strong><code>${esc(formatFingerprint(p.fingerprint))}</code><small>${esc(p.userId)}</small></div>`).join('')}<label class="inline-check"><input id="trust-checked" type="checkbox">${membership ? '我确认以上成员与安全码' : '我已核对这些安全码'}</label><div class="dialogactions"><button class="secondarybtn" id="trust-cancel">暂不发送</button><button class="sendbtn" id="trust-confirm" disabled>确认并继续</button></div>`;
-      $('trust-checked').onchange = event => { $('trust-confirm').disabled = !event.target.checked; };
-      const finish = accepted => { const done = trustResolve; trustResolve = null; $('trust-dialog').close(); $('trust-content').replaceChildren(); done?.(accepted); };
+      if (trustResolve) trustResolve(false);
+      const done=accepted=>resolve(accepted&&box===cryptoBox&&generation===epoch&&vault===vaultVersion&&box.ready&&!securityTransition);
+      trustResolve=done;
+      const historical=changedPeers.every(p=>p.historical);
+      $('trust-content').innerHTML = `<h2 id="trust-title">${historical?'历史聊天的安全码不同':'联系人加密身份已变更'}</h2><p class="dialogcopy">${historical?'这段历史使用了与本机已记录身份不同的旧密钥。只有确认这确实是对方原来的安全码，才继续验证历史。':'对方的安全码与本机上次记录不同，可能是重建了加密身份。请先通过可信渠道核对新的完整安全码，再继续收发。'}</p>${changedPeers.map(p => `<div class="security-code"><strong>${esc(p.displayName || person(p.userId)?.displayName || p.userId)}</strong><code>${esc(formatFingerprint(p.fingerprint))}</code>${p.previousFingerprint?`<small>本机已记录：${esc(formatFingerprint(p.previousFingerprint))}</small>`:''}<small>${esc(p.userId)}</small></div>`).join('')}<div class="dialogactions"><button class="secondarybtn" id="trust-cancel">暂不继续</button><button class="sendbtn" id="trust-confirm">信任已核对的安全码</button></div>`;
+      const finish = accepted => { if(trustResolve!==done)return;trustResolve = null; $('trust-dialog').close(); $('trust-content').replaceChildren(); done(accepted); };
       $('trust-confirm').onclick = () => finish(true); $('trust-cancel').onclick = () => finish(false);
       if (!$('trust-dialog').open) $('trust-dialog').showModal();
     });
@@ -239,47 +247,53 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('input').disabled = true; $('send').disabled = true; $('attach').disabled = true; $('stop').hidden = true; $('quickactions').hidden = true; $('mention').hidden = true;
     $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = '<span>聊天已锁定 · 正文与附件在此设备解锁</span><button id="unlock-shortcut">解锁</button>';
     $('unlock-shortcut').onclick = () => run(unlockAndRefresh);
-    $('messages').innerHTML = '<div class="live-empty"><strong>山水依旧，书信已锁</strong><span>使用恢复码解锁此设备，继续阅读与发送。</span><button class="secondarybtn" id="unlock-messages">解锁聊天</button></div>';
+    $('messages').innerHTML = '<div class="live-empty"><strong>山水依旧，书信已锁</strong><span>输入账号密码，继续阅读与发送。</span><button class="secondarybtn" id="unlock-messages">解锁聊天</button></div>';
     $('unlock-messages').onclick = () => run(unlockAndRefresh); renderList();
   }
   async function requestSecurity(status = 'locked') {
     if (securityResolve) return false;
-    const box = cryptoBox, generation = epoch, vault = vaultVersion;
-    const result = new Promise(resolve => { securityResolve = resolve; });
-    const finish = success => { const done = securityResolve; securityResolve = null; if (!success && box === cryptoBox) box.lock().catch(() => {}); $('security-dialog').close(); $('security-content').replaceChildren(); done?.(success); };
-    const valid = () => box === cryptoBox && generation === epoch && vault === vaultVersion && $('security-dialog').open;
-    if (status === 'new') {
-      $('security-content').innerHTML = '<h2 id="security-title">给你的书信一把私钥</h2><p class="dialogcopy">加密身份会在此设备生成。服务器只保存公钥、密文及加密私钥备份，恢复码不会发送给服务器。</p><p class="dialogcopy">恢复码与登录密码不同。请将恢复码和加密恢复文件分开妥善保存；丢失恢复码后，管理员也无法解锁历史。</p><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="secondarybtn" id="security-later">稍后</button><button class="sendbtn" id="security-create">创建加密身份</button></div>';
-      $('security-later').onclick = () => finish(false);
-      $('security-create').onclick = async () => {
-        const button = $('security-create'); button.disabled = true;
-        try {
-          const created = await box.createIdentity({deferRegistration:true}); if (!valid()) return;
-          $('security-content').innerHTML = `<h2 id="security-title">请保存你的恢复码</h2><p class="dialogcopy">这串恢复码可以解锁你的全部加密聊天，请勿发到聊天里或分享给任何人。</p><label class="dialogfield">恢复码<textarea class="recovery-code" id="recovery-code" readonly spellcheck="false">${esc(created.recoveryCode)}</textarea></label><div class="profile-avatar-tools"><button class="secondarybtn" id="recovery-copy">复制恢复码</button><button class="secondarybtn" id="recovery-export">下载加密恢复文件</button></div><label class="inline-check"><input id="recovery-ack" type="checkbox">我已单独保存恢复码，知道恢复文件仍需要此码解锁</label><label class="inline-check"><input id="recovery-remember" type="checkbox">记住这台私人设备</label><p class="dialogcopy">共用或不可信的设备请勿勾选。恢复码仅以本机密钥包裹后保存。</p><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="sendbtn" id="recovery-done" disabled>进入聊天</button></div>`;
-          $('recovery-copy').onclick = () => run(async () => { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText($('recovery-code').value); toast('恢复码已复制，请保存到安全的地方。'); } else { $('recovery-code').focus(); $('recovery-code').select(); toast('请复制已选中的恢复码。'); } });
-          $('recovery-export').onclick = () => run(exportRecovery);
-          $('recovery-ack').onchange = event => { $('recovery-done').disabled = !event.target.checked; };
-          $('recovery-done').onclick = async () => { const doneButton = $('recovery-done'); doneButton.disabled = true; try { await box.registerIdentity(); if ($('recovery-remember').checked) await box.rememberDevice(); if (valid()) finish(true); } catch (e) { if (valid()) $('security-error').textContent = e.message; doneButton.disabled = false; } };
-        } catch (e) { if (valid()) $('security-error').textContent = e.message; if (button.isConnected) button.disabled = false; }
-      };
-    } else {
-      $('security-content').innerHTML = `<h2 id="security-title">解锁你的聊天</h2><p class="dialogcopy">恢复码只在此设备使用，不会传给服务器。登录密码不能替代恢复码。</p><form id="unlock-form" class="account-form"><label>恢复码<input id="unlock-code" type="password" autocomplete="off" spellcheck="false" required></label><label>加密恢复文件（可选）<input id="unlock-backup" type="file" accept=".json,application/json"></label><label class="inline-check"><input id="unlock-remember" type="checkbox">记住这台私人设备</label><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="secondarybtn" id="unlock-later" type="button">稍后</button><button class="sendbtn" id="unlock-confirm">解锁</button></div></form>`;
-      $('unlock-later').onclick = () => finish(false);
-      $('unlock-form').onsubmit = async event => {
-        event.preventDefault(); const button = $('unlock-confirm'), code = $('unlock-code').value.trim(); button.disabled = true;
-        try { const file = $('unlock-backup').files?.[0], opts = {remember:$('unlock-remember').checked}; if (file) { if (file.size > 2 * 1024 * 1024) throw new Error('恢复文件过大，请选择正确的 JSON 备份。'); await box.importBackup(JSON.parse(await file.text()),code,opts); } else await box.unlock(code,opts); if (valid()) { $('unlock-code').value = ''; finish(true); } }
-        catch (e) { if (valid()) $('security-error').textContent = e.message; }
-        finally { if (button.isConnected) button.disabled = false; }
-      };
-    }
-    $('security-dialog').showModal(); return result;
+    const box=cryptoBox,generation=epoch,vault=vaultVersion;
+    const result=new Promise(resolve=>{securityResolve=resolve;});
+    const finish=success=>{const done=securityResolve;securityResolve=null;if(!success&&box===cryptoBox)box.lock().catch(()=>{});$('security-dialog').close();$('security-content').replaceChildren();done?.(success);};
+    const valid=()=>box===cryptoBox&&generation===epoch&&vault===vaultVersion&&$('security-dialog').open;
+    const legacy=status==='legacy_locked', fresh=status==='new', migration=status==='migration',changed=status==='identity_changed';
+    const title=changed?'确认账户的新加密身份':fresh?'启用加密聊天':migration?'完成账号升级':legacy?'恢复旧账号的聊天功能':'解锁聊天';
+    $('security-content').innerHTML=`<h2 id="security-title">${title}</h2><p class="dialogcopy">${changed?'此账户的加密身份已经在另一台设备重建。请输入账号密码确认新身份，新密钥不能解锁需要旧密钥的历史消息。':legacy?'这是旧版账户，原加密密钥未能自动解锁。若还有旧密钥，可保留原聊天；否则可重新启用，继续使用原账号。':migration?'本机还保留原加密密钥。输入账号密码即可迁移，以后不用再保管恢复码。':'使用账号密码即可启用或解锁聊天，无需额外恢复码。'}</p><form id="unlock-form" class="account-form"><label>账号密码<input id="unlock-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label>${legacy?'<details id="legacy-unlock"><summary>我还有旧版恢复码</summary><label>旧版恢复码（仅迁移使用）<input id="unlock-code" type="password" autocomplete="off" spellcheck="false"></label></details>':''}<label class="inline-check"><input id="unlock-remember" type="checkbox" checked>记住此设备，下次自动解锁</label><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="secondarybtn" id="unlock-later" type="button">稍后</button><button class="sendbtn" id="unlock-confirm">${legacy?'保留原密钥并升级':'继续'}</button></div></form>${legacy?'<details class="memory-clear" id="lost-key-options"><summary>原恢复码已丢失，重新启用聊天</summary><p class="dialogcopy">重建加密身份会保留账号、好友和旧聊天密文。无法取得原密钥的旧消息将不能在此身份下解密；好友需要核对新安全码，旧会话归档。管理员可能需要重新配置山岚。</p><label class="inline-check"><input id="reset-identity-confirm" type="checkbox">我了解旧消息可能无法解密，仍要重新启用</label><button class="secondarybtn" id="reset-identity" disabled>确认重建加密身份</button></details>':''}`;
+    $('unlock-later').onclick=()=>finish(false);
+    const remember=()=>$('unlock-remember').checked;
+    const error=message=>{if(valid())$('security-error').textContent=message;};
+    const submit=async reset=>{
+      const button=$(reset?'reset-identity':'unlock-confirm'),password=$('unlock-password').value,keep=remember();
+      if(!password||password.length<8){error('请输入账号密码。');$('unlock-password').focus();return;}
+      if(reset&&!$('reset-identity-confirm')?.checked)return;
+      button.disabled=true;
+      $('unlock-confirm').disabled=true;
+      if($('reset-identity'))$('reset-identity').disabled=true;
+      try{
+        if(reset){await box.resetPasswordIdentity(password,{remember:keep});}
+        else if(changed){await box.acceptIdentityReset(password,{remember:keep});}
+        else if(fresh){await box.createPasswordIdentity(password,{remember:keep});}
+        else{
+          if(legacy&&!box.ready){const code=$('unlock-code').value.trim();if(!code)throw new Error('如果原恢复码已丢失，请展开下方“重新启用聊天”。');await box.unlock(code,{remember:false});}
+          await box.unlockPassword(password,{remember:keep});
+        }
+        if(valid()){ $('unlock-password').value='';if($('unlock-code'))$('unlock-code').value='';finish(true); }
+      }catch(e){error(e.message);}
+      finally{if(valid()){$('unlock-confirm').disabled=false;if($('reset-identity'))$('reset-identity').disabled=!$('reset-identity-confirm').checked;}}
+    };
+    $('unlock-form').onsubmit=event=>{event.preventDefault();submit(false);};
+    if(legacy){$('reset-identity-confirm').onchange=event=>{$('reset-identity').disabled=!event.target.checked;};$('reset-identity').onclick=()=>submit(true);}
+    $('security-dialog').showModal();return result;
   }
-  $('security-dialog').addEventListener('cancel',event => { event.preventDefault(); if ($('recovery-code')) return; const done = securityResolve; securityResolve = null; cryptoBox?.lock().catch(() => {}); $('security-dialog').close(); $('security-content').replaceChildren(); done?.(false); });
+  $('security-dialog').addEventListener('cancel',event=>{event.preventDefault();const done=securityResolve;securityResolve=null;cryptoBox?.lock().catch(()=>{});$('security-dialog').close();$('security-content').replaceChildren();done?.(false);});
   async function unlockAndRefresh() {
-    if (!cryptoBox || !user) return; const box = cryptoBox, generation = epoch;
-    if (!box.ready && !await requestSecurity(box.identity ? 'locked' : 'new')) { showLocked(); return; }
-    if (box !== cryptoBox || generation !== epoch) return;
-    await loadState(); await refreshAll(); if (current) await switchChat(current,false,false);
+    if(!cryptoBox||!user)return;const box=cryptoBox,generation=epoch;
+    if(!box.ready||!box.passwordAccess){
+      const status=box.pendingReset?'identity_changed':!box.identity?'new':box.passwordAccess?'locked':box.ready?'migration':'legacy_locked';
+      if(!await requestSecurity(status)){showLocked();return;}
+    }
+    if(box!==cryptoBox||generation!==epoch)return;
+    await loadState();await refreshAll();if(current)await switchChat(current,false,false);
   }
   async function lockChat(forget = false) {
     if (!cryptoBox || !beginSecurityTransition()) return;
@@ -315,18 +329,18 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const box = cryptoBox, generation = epoch, vault = vaultVersion;
     try {
       const prior = (messages.get(c.id) || []).find(item => item.id === sourceMessage.id), envelope = sourceMessage.envelope;
-      const senderKey = box.records.get(sourceMessage.senderId)?.key, manifest = envelope && box.chains.get(c.id)?.[envelope.revision - 1];
-      if (prior?._decrypted && !prior.decryptError && prior._verifiedEpoch === box.epoch && senderKey && prior._verifiedSenderKey === senderKey && manifest && prior._verifiedManifest === manifest && envelope?.senderFingerprint === box.records.get(sourceMessage.senderId)?.fingerprint && sourceMessage.chatId === c.id && sourceMessage.chatId === prior.chatId && sourceMessage.senderId === prior.senderId && sourceMessage.clientId === prior.clientId && sourceMessage.contentVersion === 1 && sourceMessage.file?.id === prior._wire?.file?.id && JSON.stringify(envelope) === JSON.stringify(prior._wire?.envelope)) {
+      const senderKey = (envelope&&box.recordFor(sourceMessage.senderId,envelope.senderFingerprint)?.key), manifest = envelope && box.chains.get(c.id)?.[envelope.revision - 1];
+      if (prior?._decrypted && !prior.decryptError && prior._verifiedEpoch === box.epoch && senderKey && prior._verifiedSenderKey === senderKey && manifest && prior._verifiedManifest === manifest && envelope?.senderFingerprint === (envelope&&box.recordFor(sourceMessage.senderId,envelope.senderFingerprint)?.fingerprint) && sourceMessage.chatId === c.id && sourceMessage.chatId === prior.chatId && sourceMessage.senderId === prior.senderId && sourceMessage.clientId === prior.clientId && sourceMessage.contentVersion === 1 && sourceMessage.file?.id === prior._wire?.file?.id && JSON.stringify(envelope) === JSON.stringify(prior._wire?.envelope)) {
         return {...prior,...sourceMessage,kind:prior.kind,text:prior.text,quote:prior.quote,file:prior.file,ai:prior.ai,createdAt:prior.sentAt || sourceMessage.createdAt,_wire:sourceMessage};
       }
       const payload = await box.decrypt(c,sourceMessage);
       if (generation !== epoch || vault !== vaultVersion || box !== cryptoBox || !box.ready) return {...sourceMessage,text:'',quote:null,file:null,locked:true};
       const quote = payload.quote && typeof payload.quote === 'object' ? {id:String(payload.quote.id || ''),senderName:String(payload.quote.senderName || '').slice(0,100),text:String(payload.quote.text || '').slice(0,12000)} : null;
-      return {...sourceMessage,createdAt:payload.sentAt || sourceMessage.createdAt,sentAt:payload.sentAt || null,kind:payload.kind,text:payload.text,quote,file:payload.file || null,ai:payload.ai || null,legacy:sourceMessage.contentVersion === 0 || !sourceMessage.envelope && !sourceMessage.contentVersion,_wire:sourceMessage,_decrypted:true,_verifiedEpoch:box.epoch,_verifiedSenderKey:box.records.get(sourceMessage.senderId)?.key,_verifiedManifest:envelope && box.chains.get(c.id)?.[envelope.revision - 1]};
+      return {...sourceMessage,createdAt:payload.sentAt || sourceMessage.createdAt,sentAt:payload.sentAt || null,kind:payload.kind,text:payload.text,quote,file:payload.file || null,ai:payload.ai || null,legacy:sourceMessage.contentVersion === 0 || !sourceMessage.envelope && !sourceMessage.contentVersion,_wire:sourceMessage,_decrypted:true,_verifiedEpoch:box.epoch,_verifiedSenderKey:(envelope&&box.recordFor(sourceMessage.senderId,envelope.senderFingerprint)?.key),_verifiedManifest:envelope && box.chains.get(c.id)?.[envelope.revision - 1]};
     }
     catch (error) {
-      if (c?.kind === 'group' && /尚未确认联系人的安全指纹/.test(error.message) && generation === epoch && vault === vaultVersion && box === cryptoBox && box.ready) {
-        chatSecurityErrors.set(c.id,'群成员有变化，请核对新成员的安全码后继续收发。');
+      if (c && /尚未确认(?:历史)?联系人的安全指纹/.test(error.message) && generation === epoch && vault === vaultVersion && box === cryptoBox && box.ready) {
+        chatSecurityErrors.set(c.id,'加密身份有变化，请核对安全码后继续收发。');
         if (current === c.id) renderHeader();
       }
       return {...sourceMessage,text:'',quote:null,file:null,decryptError:error.message,_wire:sourceMessage};
@@ -335,7 +349,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   function showAuth(mode = 'login', error = '') {
     authMode = mode; const setup = mode === 'setup', register = mode === 'register';
     $('auth').hidden = false; $('app').hidden = true;
-    $('auth').innerHTML = `<div class="auth-card"><h2>${setup ? '开启你的山水空间' : register ? '相聚山水之间' : '欢迎回到山水之间'}</h2><p class="dialogcopy">${setup ? '使用部署时生成的初始化口令，创建管理员账户。' : register ? '使用朋友分享的邀请码，创建你的账户。' : '登录，与朋友和 AI 继续聊聊。'}</p><form id="auth-form">${setup ? '<label>初始化口令<input name="setupToken" id="setup-token" autocomplete="off" type="password" required></label>' : ''}<label>账户名<input name="username" id="auth-username" autocomplete="username" minlength="3" maxlength="32" required placeholder="英文字母、数字或下划线"></label>${setup || register ? '<label>昵称<input name="displayName" id="auth-name" autocomplete="nickname" maxlength="40" required></label>' : ''}<label>密码<input name="password" id="auth-password" type="password" autocomplete="${setup || register ? 'new-password' : 'current-password'}" minlength="8" maxlength="128" required></label>${register ? '<label>邀请码<input name="inviteCode" id="auth-invite" autocomplete="off" required></label>' : ''}<p class="form-error" id="auth-error" role="alert">${esc(error)}</p><button class="sendbtn" type="submit" id="auth-submit">${setup ? '创建管理员' : register ? '注册并进入' : '登录'}</button></form>${!setup ? `<div class="auth-links"><button id="auth-switch">${register ? '已有账户，去登录' : '使用邀请码注册'}</button><button id="auth-refresh">重新连接</button></div>` : ''}<p class="auth-server">${esc(location.host)} · 山水通讯</p></div>`;
+    $('auth').innerHTML = `<div class="auth-card"><h2>${setup ? '开启你的山水空间' : register ? '相聚山水之间' : '欢迎回到山水之间'}</h2><p class="dialogcopy">${setup ? '使用部署时生成的初始化口令，创建管理员账户。' : register ? '使用朋友分享的邀请码，创建你的账户。' : '登录，与朋友和 AI 继续聊聊。'}</p><form id="auth-form">${setup ? '<label>初始化口令<input name="setupToken" id="setup-token" autocomplete="off" type="password" required></label>' : ''}<label>账户名<input name="username" id="auth-username" autocomplete="username" minlength="3" maxlength="32" required placeholder="英文字母、数字或下划线"></label>${setup || register ? '<label>昵称<input name="displayName" id="auth-name" autocomplete="nickname" maxlength="40" required></label>' : ''}<label>密码<input name="password" id="auth-password" type="password" autocomplete="${setup || register ? 'new-password' : 'current-password'}" minlength="8" maxlength="128" required></label>${register ? '<label>邀请码<input name="inviteCode" id="auth-invite" autocomplete="off" required></label>' : ''}<label class="inline-check"><input id="auth-remember" type="checkbox" checked>记住此设备，下次自动解锁</label><p class="form-error" id="auth-error" role="alert">${esc(error)}</p><button class="sendbtn" type="submit" id="auth-submit">${setup ? '创建管理员' : register ? '注册并进入' : '登录'}</button></form>${!setup ? `<div class="auth-links"><button id="auth-switch">${register ? '已有账户，去登录' : '使用邀请码注册'}</button><button id="auth-refresh">重新连接</button></div>` : ''}<p class="auth-server">${esc(location.host)} · 山水通讯</p></div>`;
     if ($('auth-switch')) $('auth-switch').onclick = () => showAuth(register ? 'login' : 'register');
     if ($('auth-refresh')) $('auth-refresh').onclick = () => run(bootstrap);
     $('auth-form').onsubmit = async event => {
@@ -347,9 +361,9 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         if (startEpoch !== epoch) return;
         sessionChannel?.postMessage({type:'changed'});
         $('auth-password').value = ''; if ($('setup-token')) $('setup-token').value = '';
-        await enter(result.user);
+        await enter(result.user,{password:values.password,remember:$('auth-remember')?.checked!==false});
       } catch (e) { if (!e.stale && errorBox.isConnected) errorBox.textContent = e.message; }
-      finally { if (button.isConnected) button.disabled = false; }
+      finally { values.password=''; if (button.isConnected) button.disabled = false; }
     };
   }
   async function bootstrap() {
@@ -357,23 +371,32 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       const info = await api('/api/bootstrap'); needsSetup = info.needsSetup;
       if (!info.e2eeRequired || typeof info.serverInstanceId !== 'string') throw new Error('此客户端需要山水通讯 1.3 加密服务器，请升级服务端后重试。');
       if (info.friendshipRequired !== true) throw new Error('此客户端需要支持好友申请的山水通讯服务器，请升级服务端后重试。');
-      serverId = info.serverInstanceId;
+      if(info.passwordAccess!==true)throw new Error('请先升级山水通讯服务器到 1.5.0。');
+      serverId = info.serverInstanceId; archiveRecoveryAvailable = info.archiveRecovery === true;
       if (needsSetup) { showAuth('setup'); return; }
       try { const me = await api('/api/me'); await enter(me.user); }
       catch (e) { if (e.status === 401) showAuth('login'); else throw e; }
     } catch (e) { showAuth(needsSetup ? 'setup' : 'login',e.message); }
   }
-  async function enter(value) {
+  async function enter(value,{password,remember=true}={}) {
     epoch++; user = {...value,id:String(value.id)}; $('auth').hidden = true; $('app').hidden = false; $('auth').replaceChildren();
     setNavigation('chat');
     cryptoBox = new CryptoBox({api,user,serverId}); const box = cryptoBox, generation = epoch;
     paintSelf(); renderEmpty();
-    const state = await box.initialize(); if (generation !== epoch || box !== cryptoBox) return;
-    if (state.status !== 'ready') await requestSecurity(state.status);
+    let state;
+    try{
+      state=await box.initialize({password,remember,passwordAccess:true});
+      if(generation!==epoch||box!==cryptoBox)return;
+      if(state.status==='new'&&password){await box.createPasswordIdentity(password,{remember});state={status:'ready'};}
+    }catch(error){if(generation!==epoch||box!==cryptoBox)return;toast(error.message);state={status:box.pendingReset?'identity_changed':!box.identity?'new':box.passwordAccess?'locked':box.ready?'migration':'legacy_locked'};}
+    password=undefined;
+    if(box.rememberError)toast('此设备无法保存自动解锁信息；下次仍可用账号密码进入。');
+    if(generation!==epoch||box!==cryptoBox)return;
+    if(state.status!=='ready'||!box.passwordAccess)await requestSecurity(state.status==='ready'?'migration':state.status);
     if (generation !== epoch || box !== cryptoBox) return;
     if (box.ready) await loadState();
     await refreshAll();
-    if (user && !current && chats.length) await switchChat(chats[0].id,false);
+    if(user&&!current&&chats.length)await switchChat((chats.find(c=>!c.archived)||chats[0]).id,false);
     if (!user) return;
     if (box.ready) run(async () => { const result = await api('/api/saved'); saved = new Set(result.items.map(i => String(i.message.id))); renderMessages(); });
     connectEvents();
@@ -412,7 +435,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (current && !chat()) { current = null; selection++; renderEmpty(); }
       if (!cryptoBox?.ready) showLocked();
       else if (current) { renderHeader(); if (current !== refreshedChat) await fetchMessages(current,false); }
-      else if (chats.length && activeView !== 'people') await switchChat(chats[0].id,false);
+      else if(chats.length&&activeView!=='people')await switchChat((chats.find(c=>!c.archived)||chats[0]).id,false);
       if (activeView === 'people' && !contactBusy && cryptoBox?.ready && !securityTransition) run(() => loadContacts({silent:true}));
       if (source?.readyState === EventSource.OPEN) setConnection(true);
     } catch (e) { if (generation === epoch) setConnection(false); throw e; }
@@ -426,11 +449,11 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   function renderList() {
     const q = $('search').value.trim().toLocaleLowerCase();
     const list = chats.filter(c => (filter === 'all' || filter === 'person' && ['direct','group'].includes(c.kind) || filter === 'ai' && (c.kind === 'ai'||c.members.some(m=>m.id==='ai')) || filter === 'unread' && c.unread > 0) && (!q || c.name.toLocaleLowerCase().includes(q) || cryptoBox?.ready && c.lastMessage?.text?.toLocaleLowerCase().includes(q)));
-    list.sort((a,b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    stableChildren($('chatlist'),list.length ? list.map(c => `<button class="chatitem ${c.id === current ? 'current' : ''}" data-chat="${esc(c.id)}" ${c.id === current ? 'aria-current="true"' : ''}><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><div class="itemtext"><div class="itemtop"><strong>${esc(c.name)}${c.pinned ? '<span class="smalltag">置顶</span>' : ''}</strong><time>${esc(time(c.updatedAt))}</time></div><div class="preview"><span>${esc(c.lastMessage ? !cryptoBox?.ready || c.lastMessage.locked ? '加密消息 · 解锁后查看' : c.lastMessage.decryptError ? '加密消息 · 需核验安全码' : c.lastMessage.file ? `[文件] ${c.lastMessage.file.name}` : c.lastMessage.text || '加密消息' : '开始一段新的对话')}</span>${c.unread ? `<span class="unread">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</div></div></button>`).join('') : '<p class="empty">还没有符合条件的会话。<br>点击右上角 +，开始聊天。</p>','data-chat');
+    list.sort((a,b) => Number(!!b.archiveAssistPending)-Number(!!a.archiveAssistPending)||Number(!!a.archived)-Number(!!b.archived)||Number(b.pinned) - Number(a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    stableChildren($('chatlist'),list.length ? list.map(c => `<button class="chatitem ${c.id === current ? 'current' : ''}" data-chat="${esc(c.id)}" ${c.id === current ? 'aria-current="true"' : ''}><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><div class="itemtext"><div class="itemtop"><strong>${esc(c.name)}${c.archived?'<span class="smalltag">归档</span>':''}${c.archiveAssistPending?'<span class="smalltag">恢复请求</span>':''}${c.pinned ? '<span class="smalltag">置顶</span>' : ''}</strong><time>${esc(time(c.updatedAt))}</time></div><div class="preview"><span>${esc(c.lastMessage ? !cryptoBox?.ready || c.lastMessage.locked ? '加密消息 · 解锁后查看' : c.lastMessage.decryptError ? (c.archived ? '旧加密消息 · 可尝试恢复' : '加密消息 · 需核验安全码') : c.lastMessage.file ? `[文件] ${c.lastMessage.file.name}` : c.lastMessage.text || '加密消息' : '开始一段新的对话')}</span>${c.unread ? `<span class="unread">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</div></div></button>`).join('') : '<p class="empty">还没有符合条件的会话。<br>点击右上角 +，开始聊天。</p>','data-chat');
     $('chatlist').querySelectorAll('[data-chat]').forEach(b => { b.onclick = () => run(() => switchChat(b.dataset.chat)); });
   }
-  async function switchChat(id,mobile = true,saveDraft = true) {
+  async function switchChat(id,mobile = true,saveDraft = true,review = false) {
     id = String(id); if (!chat(id)) return;
     setNavigation('chat');
     if (current && saveDraft) drafts[current] = $('input').value;
@@ -440,7 +463,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     chatSecurityErrors.set(id,'正在核验加密成员…');
     renderHeader(); renderList(); renderMessages('open'); renderCompose(); storeState();
     const version = selection, box = cryptoBox, generation = epoch; let preparationError = '';
-    try { await box.prepareChat(chat(id),approveTrust); } catch (e) { preparationError = e.message || '加密成员尚未完成验证。'; }
+    try { await box.prepareChat(chat(id),review?reviewTrust:approveTrust); } catch (e) { preparationError = e.message || '加密成员尚未完成验证。'; }
     if (current !== id || selection !== version || generation !== epoch || box !== cryptoBox || !box.ready) return;
     if (preparationError) chatSecurityErrors.set(id,preparationError); else chatSecurityErrors.delete(id);
     renderHeader(); renderCompose();
@@ -495,6 +518,15 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('input').disabled = false; $('attach').disabled = false; $('emoji').disabled = false;
     $('chatname').textContent = c.name; $('headavatar').className = `avatar ${chatStyle(c)}`; setStableHTML($('headavatar'),chatAvatar(c));
     $('chatsub').textContent = c.kind === 'group' ? `${c.members.filter(p => p.id !== 'ai').length} 位成员${isAI(c) ? ' · 山岚直连 AI' : ''}` : c.kind === 'ai' ? 'AI 助手 · 此设备直连模型' : c.kind === 'notes' ? '仅自己可见' : '私聊';
+    if(c.archived){
+      $('input').disabled=true;$('attach').disabled=true;$('send').disabled=true;$('emoji').disabled=true;$('quickactions').hidden=true;$('input').placeholder='旧会话已归档，不能继续发送';
+      $('chatpolicy').hidden=false;
+      const historyError=chatSecurityErrors.get(c.id),review=historyError&&historyError!=='正在核验加密成员…';
+      setStableHTML($('chatpolicy'),`<span>旧会话 · ${c.archiveAssistPending?'好友请求协助恢复':'历史保留'}${review?' · '+esc(historyError):''}</span>${archiveRecoveryAvailable?'<button id="restore-archive">恢复旧记录</button>':''}${review?'<button id="review-archive">核验安全码</button>':''}${c.successorId?'<button id="open-successor">进入新会话</button>':''}`);
+      if($('restore-archive'))$('restore-archive').onclick=()=>run(()=>archiveRecoverySettings(c));
+      if($('review-archive'))$('review-archive').onclick=()=>run(()=>switchChat(c.id,false,true,true));
+      if($('open-successor'))$('open-successor').onclick=()=>run(()=>switchChat(c.successorId));renderMention();return;
+    }
     if (friendshipBlocked(c)) {
       $('input').disabled = true; $('attach').disabled = true; $('send').disabled = true; $('emoji').disabled = true; $('quickactions').hidden = true; renderMention();
       $('input').placeholder = '成为好友后才能发送消息';
@@ -507,9 +539,10 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     if (securityError) {
       $('input').disabled = true; $('attach').disabled = true; $('send').disabled = true; $('quickactions').hidden = true; renderMention();
       $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>需要核验加密成员 · ${esc(securityError)}</span><button id="retry-encryption">${c.kind === 'group' ? '核验群成员' : '重新验证'}</button>`;
-      $('retry-encryption').onclick = () => run(() => switchChat(c.id,false)); return;
+      $('retry-encryption').onclick = () => run(() => switchChat(c.id,false,true,true)); return;
     }
-    $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>${isAI(c) ? c.context === 'none' ? '聊天端到端加密 · AI 已暂停' : '聊天端到端加密 · AI 输入由此设备直达模型' : '端到端加密 · 在你的设备解密'}</span>${isAI(c) ? '<button id="ai-context-shortcut">AI 前文与隐私</button>' : ''}${c.kind==='ai'?'<button id="ai-memory-shortcut">长期记忆</button>':''}<button id="viewpolicy">安全详情</button>`;
+    $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>${isAI(c) ? c.context === 'none' ? '聊天端到端加密 · AI 已暂停' : '聊天端到端加密 · AI 输入由此设备直达模型' : '端到端加密 · 在你的设备解密'}</span>${c.predecessorId?'<button id="open-predecessor">旧聊天记录</button>':''}${isAI(c) ? '<button id="ai-context-shortcut">AI 前文与隐私</button>' : ''}${c.kind==='ai'?'<button id="ai-memory-shortcut">长期记忆</button>':''}<button id="viewpolicy">安全详情</button>`;
+    if ($('open-predecessor')) $('open-predecessor').onclick = () => run(() => switchChat(c.predecessorId));
     if ($('ai-context-shortcut')) $('ai-context-shortcut').onclick = () => run(() => showAIContext(c.id));
     if($('ai-memory-shortcut'))$('ai-memory-shortcut').onclick=()=>run(memorySettings);
     $('viewpolicy').onclick = showDetails; $('quickactions').hidden = !isAI(c) || c.context === 'none'; renderMention();
@@ -784,14 +817,14 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     let drawButton=$('ai-draw');if(!drawButton){drawButton=document.createElement('button');drawButton.id='ai-draw';drawButton.type='button';drawButton.className='mention ai-draw';drawButton.innerHTML=`${icon('mountain')}画一张`;searchButton.after(drawButton);drawButton.onpointerdown=event=>{if(event.isPrimary&&event.button===0&&document.activeElement===$('input'))event.preventDefault();};drawButton.onclick=insertDrawingCommand;}
     drawButton.hidden=searchButton.hidden;drawButton.disabled=searchButton.disabled;drawButton.title='描述想画的内容，发送后由生图模型绘制';
     if (!cryptoBox?.ready) { $('send').disabled = true; return; }
-    if (chatSecurityErrors.has(current) || friendshipBlocked(chat())) { $('send').disabled = true; return; }
+    if (chat()?.archived || chatSecurityErrors.has(current) || friendshipBlocked(chat())) { $('send').disabled = true; return; }
     if (!current) return; const quote = quotes[current], file = attachments.get(current), generating = aiJobs.has(current), preparing = aiPreparing.has(current);
     $('quote').hidden = !quote; $('quotetext').textContent = quote ? `回复 ${quote.senderName}：${quote.text}` : '';
     $('attachment').hidden = !file; $('attachmentname').textContent = file ? `${file.name} · ${bytes(file.size)}` : '';
     $('stop').hidden = !generating; $('send').hidden = false; $('send').disabled = preparing || generating || (!$('input').value.trim() && !file); resizeComposer();
   }
   async function deliver(item,{signal} = {}) {
-    if (!user || !cryptoBox?.ready || securityTransition || signal?.aborted || item.status === 'sending') return false; const generation = epoch, vault = vaultVersion, box = cryptoBox;
+    if (!user || !cryptoBox?.ready || securityTransition || signal?.aborted || item.status === 'sending' || chat(item.chatId)?.archived) return false; const generation = epoch, vault = vaultVersion, box = cryptoBox;
     if (chatSecurityErrors.has(item.chatId)) { item.status = 'failed'; item.error = '加密成员尚未完成验证，请先重新验证此会话。'; storeState(); if (current === item.chatId) renderMessages(); return; }
     if (friendshipBlocked(chat(item.chatId))) { item.status = 'failed'; item.error = '请先添加好友，申请通过后再发送。'; storeState(); if (current === item.chatId) renderMessages(); return; }
     const controller = new AbortController(), cancel = () => controller.abort(); signal?.addEventListener('abort',cancel,{once:true}); if (signal?.aborted) controller.abort(); transfers.add(controller);outgoingJobs.set(item.clientId,controller);
@@ -828,7 +861,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (current === item.chatId) { renderMessages(); renderCompose(); markRead(); }
       queueRefresh();
       return true;
-    } catch (e) { if (!valid() || e.stale) return false; item.status = 'failed'; item.error = e.message; storeState(); if (current === item.chatId) renderMessages(); if (!e.status) setConnection(false); }
+    } catch (e) { if (!valid() || e.stale) return false; item.status = 'failed'; item.error = e.message; storeState(); if (/安全指纹|安全验证失败|加密成员/.test(e.message)) {chatSecurityErrors.set(item.chatId,e.message);if(current===item.chatId)renderHeader();} if (current === item.chatId) renderMessages(); if (!e.status) setConnection(false); }
     finally { signal?.removeEventListener('abort',cancel); transfers.delete(controller);if(outgoingJobs.get(item.clientId)===controller)outgoingJobs.delete(item.clientId); }
   }
   function makeOutgoing(id,text,file,quote,extra = {}) {
@@ -931,7 +964,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (generation !== epoch || vault !== vaultVersion || box !== cryptoBox || !box.ready || controller.signal.aborted) return;
       const authorization = await api(`/api/chats/${encodeURIComponent(id)}/ai/credential`,{method:'POST',signal:controller.signal});
       if (authorization.directOnly !== true || authorization.credential?.mode !== 'shared_direct') throw new Error('AI 配置需要更新，请联系管理员保存共享直连设置。');
-      credential = await unlockSharedAIConfiguration(box,{...authorization.credential,approveTrust,approveEndpoint:details => approveAIEndpoint(details,{signal:controller.signal}),signal:controller.signal});
+      credential = await unlockSharedAIConfiguration(box,{...authorization.credential,approveTrust:reviewTrust,approveEndpoint:details => approveAIEndpoint(details,{signal:controller.signal}),signal:controller.signal});
       if (!valid()) return;
       if (credential?.enabled !== true) throw new Error('山岚已停用，请联系管理员。');
       const operation=selection?.operation||retry?.operation||'chat',prompt=selection?.prompt||retry?.prompt||'';
@@ -1150,7 +1183,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('people-add-friend').onclick = () => { $('dialog').close(); run(() => openContacts('add')); };
     $('people-filter').oninput = event => { const q = event.target.value.trim().toLocaleLowerCase(); $('people-list').querySelectorAll('[data-person-name]').forEach(el => { el.hidden = !el.dataset.personName.includes(q); }); };
     if (kind === 'add') {
-      const note = document.createElement('p'); note.className = 'dialogcopy'; note.textContent = '选择已通过申请的好友，再核对新成员的安全码。对方须先登录并设置加密身份；加入前的聊天不会分享给新成员。'; $('dialogcontent').prepend(note);
+      const note = document.createElement('p'); note.className = 'dialogcopy'; note.textContent = '选择已通过申请的好友。对方须先登录并设置加密身份；加入前的聊天不会分享给新成员。'; $('dialogcontent').prepend(note);
       $('create-confirm').textContent = '确认添加成员'; $('create-confirm').disabled = !users.length;
       if (!users.length) $('people-list').innerHTML = '<p class="dialogcopy">没有可添加的好友。请先通过好友申请，并让对方设置加密身份，再回来添加。</p>';
     }
@@ -1167,7 +1200,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
           const manifest = await box.prepareChat(c,approveTrust); if (!valid()) return;
           const ids = [...new Set([...manifest.payload.members.map(m => m.userId),...memberIds])];
           if (ids.length > 100) throw new Error('一个群聊最多包含 100 位成员，请减少选择。');
-          result = await box.updateMembers(c,ids,approveTrust);
+          result = await box.updateMembers(c,ids,reviewTrust);
           if (!valid()) return; assertAudience(result.chat,ids);
         }
         else { result = await api('/api/chats',{method:'POST',body:{kind,name,memberIds,includeAI:kind === 'group' && $('include-ai').checked}}); assertAudience(result.chat,[user.id,...memberIds]); }
@@ -1400,6 +1433,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     if (!valid()) return;
     const candidates = (config.candidateUsers || []).map(person => ({...person,id:String(person.id)})), existingRecipients = new Set((config.configuration?.payload?.recipients || []).map(person => String(person.userId)));
     $('dialogcontent').innerHTML = `<form id="ai-form" class="account-form"><p class="dialogcopy">填写服务商的普通 API Key。获准用户的设备直接连接模型，聊天服务器只保存加密配置。</p><label class="inline-check"><input type="checkbox" id="ai-enabled" ${config.configuration ? config.enabled ? 'checked' : '' : 'checked'}>启用山岚</label><label>API 地址<input id="ai-base-url" type="url" required maxlength="2048" value="${esc(config.configuration?.payload?.baseUrl || (config.mode === 'shared_direct' ? config.baseUrl : '') || 'https://ai.isok.dev/v1')}" placeholder="https://ai.isok.dev/v1" autocomplete="off"></label><label>API Key<input id="ai-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="${config.configuration ? '已加密保存，留空保留原 Key' : '粘贴服务商提供的普通 API Key'}"></label><label>模型<input id="ai-model" list="ai-model-options" maxlength="200" required value="${esc(config.configuration?.payload?.model || (config.mode === 'shared_direct' ? config.model : '') || '')}" placeholder="读取模型列表，或手动填写模型名称" autocomplete="off"><datalist id="ai-model-options"></datalist></label><div class="ai-model-tools"><button type="button" class="secondarybtn" id="ai-load-models">读取模型</button><span id="ai-model-status" class="dialogcopy" role="status">模型列表由此设备直接读取；也可手动填写。</span></div><h3 class="ai-authorize-title">允许使用山岚的账户</h3><p class="dialogcopy">Key 不在普通用户界面显示，获准设备仍有能力提取。请只授权你信任的账户；费用与限额由服务商管理。</p><button type="button" id="ai-authorize-new" class="secondarybtn">勾选所有已准备好的账户</button><div class="choice-users ai-authorized-users">${candidates.map(person => `<label class="choice-user"><input type="checkbox" name="ai-recipient" value="${esc(person.id)}" ${person.identity && (!config.configuration || existingRecipients.has(person.id)) ? 'checked' : ''} ${!person.identity || person.id === user.id ? 'disabled' : ''}><div class="avatar">${avatar(person)}</div><span>${esc(person.displayName || person.username)}<small>@${esc(person.username)} · ${person.identity ? existingRecipients.has(person.id) ? '已授权' : '待授权' : '尚未建立加密身份，需先登录并解锁聊天'}</small></span></label>`).join('')}</div><p class="dialogcopy">新用户加入后，回来勾选并保存即可，不用重新输入 Key。取消授权不能收回已取得的 Key；彻底撤销时，请在服务商处更换 Key 后重新保存。服务商会处理你主动交给 AI 的原文。</p><p class="form-error" id="ai-error" role="alert"></p><button class="sendbtn" id="ai-save">加密并保存设置</button></form>`;
+    if(!config.configuration&&config.history?.length)$('ai-form').insertAdjacentHTML('afterbegin','<p class="dialogcopy">旧加密身份已归档，原 AI 密钥无法从新身份读取。请重新填写模型、搜索等 Key，再授权给需要使用山岚的账户。</p>');
     keyField = $('ai-key');
     $('ai-form').querySelector('.ai-authorize-title').insertAdjacentHTML('beforebegin',`<div class="ai-capability-settings">${[['vision','看图','给山岚发送图片时使用，模型需要支持图片理解。'],['image','生图','使用 /生图 加描述，或对山岚说“帮我画一张…”。支持兼容接口的 images/generations。']].map(([name,label,copy])=>{const item=config.configuration?.payload?.[name];return `<details class="ai-model-section" ${item?.enabled?'open':''}><summary>${label}模型${item?.enabled?' · 已启用':' · 可选'}</summary><p class="dialogcopy">${copy}</p><label class="inline-check"><input id="ai-${name}-enabled" type="checkbox" ${item?.enabled?'checked':''}>启用${label}</label><label>API 地址<input id="ai-${name}-base-url" type="url" maxlength="512" value="${esc(item?.baseUrl||'')}" placeholder="留空使用文字模型的 API 地址" autocomplete="off"></label><label>API Key<input id="ai-${name}-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空保留；首次留空使用文字模型的 Key"></label><label>模型名称<input id="ai-${name}-model" list="ai-${name}-model-options" maxlength="200" value="${esc(item?.model||'')}" placeholder="填写支持${label}的模型名称" autocomplete="off"><datalist id="ai-${name}-model-options"></datalist></label><button type="button" class="secondarybtn" id="ai-${name}-load-models">读取可用模型</button><p class="dialogcopy" id="ai-${name}-status" role="status"></p></details>`;}).join('')}</div>`);
     for(const name of ['vision','image'])profileKeyFields.push($('ai-'+name+'-key'));
@@ -1410,7 +1444,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const savedCredential = async () => {
       if (currentCredential) return currentCredential;
       if (!config.configuration) return null;
-      const credential = await unlockSharedAIConfiguration(box,{configuration:config.configuration,history:config.history,approveTrust,approveEndpoint:details => approveAIEndpoint(details,{signal:controller.signal}),signal:controller.signal});
+      const credential = await unlockSharedAIConfiguration(box,{configuration:config.configuration,history:config.history,approveTrust:reviewTrust,approveEndpoint:details => approveAIEndpoint(details,{signal:controller.signal}),signal:controller.signal});
       if (!valid()) return null; currentCredential = credential; return credential;
     };
     for(const name of ['vision','image'])$('ai-'+name+'-load-models').onclick=async()=>{
@@ -1454,7 +1488,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         const recipientIds = [...$('ai-form').querySelectorAll('[name="ai-recipient"]:checked')].map(input => input.value);
         if (!recipientIds.includes(user.id)) throw new Error('请保留当前管理员的授权，以便以后在本机调整配置。');
         const profiles={};for(const name of ['vision','image'])profiles[name]={enabled:$('ai-'+name+'-enabled').checked,baseUrl:$('ai-'+name+'-base-url').value.trim()||$('ai-base-url').value.trim(),model:$('ai-'+name+'-model').value.trim(),key:$('ai-'+name+'-key').value.trim()||saved?.[name]?.key||key};
-        const configuration = await createSharedAIConfiguration(box,{baseUrl:$('ai-base-url').value.trim(),model:$('ai-model').value.trim(),key,enabled:$('ai-enabled').checked,searchEnabled,tavilyKey,...profiles,recipientIds,previousConfiguration:config.configuration,history:config.history,approveTrust,signal:controller.signal});
+        const configuration = await createSharedAIConfiguration(box,{baseUrl:$('ai-base-url').value.trim(),model:$('ai-model').value.trim(),key,enabled:$('ai-enabled').checked,searchEnabled,tavilyKey,...profiles,recipientIds,previousConfiguration:config.configuration,history:config.history,approveTrust:reviewTrust,signal:controller.signal});
         if (!valid()) return; $('ai-key').value = ''; $('ai-tavily-key').value='';
         for(const field of profileKeyFields)field.value='';
         await api('/api/admin/ai',{method:'PUT',body:{mode:'shared_direct',configuration},signal:controller.signal}); if (!valid()) return;
@@ -1471,60 +1505,137 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const paint = list => { $('dialogcontent').innerHTML = `<p class="dialogcopy">把邀请码分享给朋友，他们就能在登录页注册。</p><form id="invite-form" class="account-form"><label>本次允许注册的人数<input id="invite-uses" type="number" min="1" max="100" value="1" required></label><button class="sendbtn" id="invite-create">生成邀请码</button></form><div id="invite-list">${list.map(i => `<div class="admin-code"><code>${esc(i.code)}</code><small>已使用 ${Number(i.uses || i.usedCount || 0)} / ${Number(i.maxUses || 1)} 次</small></div>`).join('')}</div>`; $('invite-form').onsubmit = async event => { event.preventDefault(); const button = $('invite-create'); button.disabled = true; try { await api('/api/admin/invites',{method:'POST',body:{maxUses:Number($('invite-uses').value)}}); const all = await api('/api/admin/invites'); if (dialogCurrent(version)) paint(all.invites); } catch (e) { toast(e.message); } finally { if (button.isConnected) button.disabled = false; } }; }; paint(result.invites);
   }
   function passwordSettings() {
-    const version = openDialog('修改密码','<form id="password-form" class="account-form"><label>当前密码<input id="old-password" type="password" autocomplete="current-password" required></label><label>新密码<input id="new-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><p class="dialogcopy">修改后，其他设备需要重新登录。</p><p class="form-error" id="password-error"></p><button class="sendbtn" id="password-save">修改密码</button></form>');
-    $('password-form').onsubmit = async event => { event.preventDefault(); const button = $('password-save'); button.disabled = true; try { await api('/api/auth/password',{method:'POST',body:{currentPassword:$('old-password').value,newPassword:$('new-password').value}}); if (dialogCurrent(version)) { $('old-password').value = ''; $('new-password').value = ''; $('dialog').close(); toast('密码已修改。'); } } catch (e) { if (dialogCurrent(version)) $('password-error').textContent = e.message; } finally { if (button.isConnected) button.disabled = false; } };
+    const version=openDialog('修改密码','<form id="password-form" class="account-form"><label>当前密码<input id="old-password" type="password" autocomplete="current-password" required></label><label>新密码<input id="new-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><p class="dialogcopy">同时更新加密密钥的密码保护。其他设备需要用新密码重新登录。</p><p class="form-error" id="password-error"></p><button class="sendbtn" id="password-save">修改密码</button></form>');
+    $('password-form').onsubmit=async event=>{
+      event.preventDefault();const button=$('password-save'),box=cryptoBox,generation=epoch,oldPassword=$('old-password').value,newPassword=$('new-password').value;button.disabled=true;
+      try{
+        if(!box)throw new Error('请先登录。');
+        const remembered=!!await box.storage.get(box.scope+'remembered');
+        await box.unlockPassword(oldPassword,{remember:remembered});
+        if(!dialogCurrent(version)||box!==cryptoBox||generation!==epoch)return;
+        const fields=await box.passwordChangeFields(newPassword);
+        if(!dialogCurrent(version)||box!==cryptoBox||generation!==epoch)return;
+        const changed=await api('/api/auth/password',{method:'POST',body:{currentPassword:oldPassword,newPassword,...fields}});
+        if(box!==cryptoBox||generation!==epoch)return;
+        await box.acceptPasswordChange(changed.access||fields.access,changed.proof||fields.proof);
+        if(dialogCurrent(version)){$('old-password').value='';$('new-password').value='';$('dialog').close();toast('密码已修改，聊天记录保留。');}
+      }catch(e){if(dialogCurrent(version))$('password-error').textContent=e.message;}finally{if(button.isConnected)button.disabled=false;}
+    };
   }
   async function encryptionDetails(c = chat()) {
     if (!cryptoBox?.ready) { await unlockAndRefresh(); if (!cryptoBox?.ready) return; }
     if (!c) return securitySettings();
-    const manifest = await cryptoBox.prepareChat(c,approveTrust);
-    openDialog('这段对话的加密成员',`<p class="dialogcopy">以下收件人来自群主签名的成员记录，版本 ${manifest.payload.revision}。安全码发生变化时会停止发送，不会自动信任新密钥。</p>${manifest.payload.members.map(member => `<div class="security-code"><strong>${esc(person(member.userId,c).displayName)}${member.userId === user.id ? ' · 我' : ''}</strong><code>${esc(formatFingerprint(member.fingerprint))}</code></div>`).join('')}<p class="dialogcopy">第一次联系时，请通过另一条可信渠道核对安全码。新成员不能解密加入前的消息；服务器仍能看到成员、时间、大小与公开资料。</p>${canEdit(c) && c.kind === 'group' ? '<div class="dialogactions"><button class="secondarybtn" id="edit-encrypted-members">管理群成员</button></div>' : ''}`);
+    const manifest = await cryptoBox.prepareChat(c,reviewTrust);
+    openDialog('这段对话的加密成员',`<p class="dialogcopy">以下收件人来自群主签名的成员记录，版本 ${manifest.payload.revision}。安全码发生变化时会停止发送，不会自动信任新密钥。</p>${manifest.payload.members.map(member => `<div class="security-code"><strong>${esc(person(member.userId,c).displayName)}${member.userId === user.id ? ' · 我' : ''}</strong><code>${esc(formatFingerprint(member.fingerprint))}</code></div>`).join('')}<p class="dialogcopy">首次使用会自动记录安全码；如需独立验证身份，可通过另一条可信渠道核对。新成员不能解密加入前的消息；服务器仍能看到成员、时间、大小与公开资料。</p>${canEdit(c) && c.kind === 'group' ? '<div class="dialogactions"><button class="secondarybtn" id="edit-encrypted-members">管理群成员</button></div>' : ''}`);
     if (canEdit(c) && c.kind === 'group') {
       const add = document.createElement('button'); add.className = 'sendbtn'; add.id = 'add-encrypted-members'; add.textContent = '添加群成员'; add.onclick = () => run(() => choosePeople('add',c)); $('dialogcontent').querySelector('.dialogactions').prepend(add);
     }
     if ($('edit-encrypted-members')) $('edit-encrypted-members').onclick = () => {
       const version = openDialog('管理加密群成员',`<p class="dialogcopy">取消勾选的成员将不再收到新消息的解密副本。已经收到的消息无法收回。新增成员请使用会话详情中的“添加成员”。</p><div class="choice-users">${manifest.payload.members.map(member => `<label class="choice-user"><input type="checkbox" data-keep-member="${esc(member.userId)}" checked ${member.userId === user.id ? 'disabled' : ''}><span>${esc(person(member.userId,c).displayName)}${member.userId === user.id ? ' · 群主' : ''}</span></label>`).join('')}</div><p class="form-error" id="members-error"></p><div class="dialogactions"><button class="sendbtn" id="save-encrypted-members">签名并保存成员</button></div>`);
-      $('save-encrypted-members').onclick = async () => { const button = $('save-encrypted-members'); button.disabled = true; try { const ids = [...$('dialogcontent').querySelectorAll('[data-keep-member]:checked')].map(input => input.dataset.keepMember); const result = await cryptoBox.updateMembers(c,ids,approveTrust); if (!dialogCurrent(version)) return; upsertChat(result.chat); $('dialog').close(); if (current === c.id) showDetails(); queueRefresh(); } catch (e) { if (dialogCurrent(version)) $('members-error').textContent = e.message; } finally { if (button.isConnected) button.disabled = false; } };
+      $('save-encrypted-members').onclick = async () => { const button = $('save-encrypted-members'); button.disabled = true; try { const ids = [...$('dialogcontent').querySelectorAll('[data-keep-member]:checked')].map(input => input.dataset.keepMember); const result = await cryptoBox.updateMembers(c,ids,reviewTrust); if (!dialogCurrent(version)) return; upsertChat(result.chat); $('dialog').close(); if (current === c.id) showDetails(); queueRefresh(); } catch (e) { if (dialogCurrent(version)) $('members-error').textContent = e.message; } finally { if (button.isConnected) button.disabled = false; } };
     };
   }
+  async function archiveRecoverySettings(selected = null) {
+    if(!archiveRecoveryAvailable) {toast('此服务器暂不支持归档恢复，请升级服务端。');return;}
+    if(!cryptoBox?.ready){await unlockAndRefresh();if(!cryptoBox?.ready)return;}
+    const box=cryptoBox,generation=epoch,vault=vaultVersion;
+    const archived=chats.filter(c=>c.archived&&c.kind==='direct'&&c.friendshipStatus==='accepted'&&directPeer(c));
+    const version=openDialog('恢复旧聊天记录',`<p class="dialogcopy">重建身份时，旧聊天只是归档，没有删除。恢复会让历史重新可读，新会话与现在的账号不受影响。</p><section class="detailsection" id="archive-own"><h4>使用自己的旧恢复码</h4><p class="dialogcopy">正在读取旧加密身份…</p></section><section class="detailsection" id="archive-assistance"><h4>请好友协助</h4><p class="dialogcopy">好友只会分享双方原有的私聊内容，不会交换恢复码或私人密钥。</p>${archived.length?`<label class="account-form">归档会话<select id="archive-assist-chat">${archived.map(c=>`<option value="${esc(c.id)}" ${selected?.id===c.id?'selected':''}>${esc(c.name)} · ${esc(time(c.updatedAt))}</option>`).join('')}</select></label><div id="archive-assist-status"><p class="dialogcopy">正在读取协助状态…</p></div>`:'<p class="dialogcopy">没有可以协助恢复的好友归档私聊。</p>'}</section><p class="form-error" id="archive-recovery-error" role="alert"></p>`);
+    const valid=()=>dialogCurrent(version)&&box===cryptoBox&&generation===epoch&&vault===vaultVersion&&box.ready&&!securityTransition;
+    const error=e=>{if(valid())$('archive-recovery-error').textContent=e?.message||String(e||'');};
+    let busy=false, controller=null, assistRequest=0;
+    sensitiveDialogCleanup=()=>{ controller?.abort(); };
+    async function refreshArchiveHistory(){
+      for(const c of chats.filter(c=>c.archived)){messages.delete(c.id);hasMore.delete(c.id);}
+      if(current&&chat()?.archived)await switchChat(current,false,false);
+      await refreshAll();
+    }
+    async function loadOwn(){
+      const identities=await box.listArchivedIdentities();if(!valid())return;
+      const restored=identities.filter(r=>r.restored),remaining=identities.filter(r=>!r.restored);
+      $('archive-own').innerHTML=`<h4>使用自己的旧恢复码</h4>${restored.length?`<p class="dialogcopy">此设备已解锁 ${restored.length} 个旧身份。旧会话仍是只读的。</p>`:''}${remaining.length?`<form id="archive-code-form" class="account-form"><label>旧加密身份<select id="archive-key-id">${remaining.map(r=>`<option value="${esc(r.fingerprint)}">${esc(time(r.archivedAt)||'旧身份')} · ${esc(formatFingerprint(r.fingerprint).slice(0,19))}…</option>`).join('')}</select></label><label>旧恢复码<input id="archive-code" type="password" autocomplete="off" spellcheck="false" required placeholder="填写原来的 64 位恢复码"></label><label class="inline-check"><input id="archive-remember" type="checkbox" checked>在这台私人设备保留解锁信息</label><p class="dialogcopy">恢复码只在此设备解锁旧密钥，不会发给服务器或好友。另一台设备仍需重新填写。</p><button class="sendbtn" id="archive-code-submit">解锁旧聊天</button></form>`:'<p class="dialogcopy">'+(restored.length?'所有已保存的旧身份均已恢复。':'此账户没有重建前的加密身份可恢复。')+'</p>'}${restored.length?'<button class="secondarybtn" id="archive-forget">清除此设备的旧密钥解锁信息</button>':''}`;
+      if($('archive-code-form'))$('archive-code-form').onsubmit=event=>{
+        event.preventDefault();if(busy||!valid())return;
+        const button=$('archive-code-submit'),input=$('archive-code'),keyId=$('archive-key-id').value,remember=$('archive-remember').checked;
+        busy=true;button.disabled=true;error('');
+        run(async()=>{try{
+          await box.restoreArchivedIdentity(keyId,input.value,{remember});if(!valid())return;
+          input.value='';await loadOwn();if(!valid())return;
+          toast('旧身份已在此设备解锁，正在刷新历史聊天。');await refreshArchiveHistory();
+        }catch(e){error(e);if(input.isConnected)input.value='';}finally{busy=false;if(button.isConnected)button.disabled=false;}});
+      };
+      if($('archive-forget'))$('archive-forget').onclick=()=>run(async()=>{
+        if(busy||!valid())return;busy=true;error('');
+        try{await box.forgetArchivedIdentities();if(valid()){await loadOwn();await refreshArchiveHistory();toast('已移除此设备的旧身份解锁信息。');}}
+        catch(e){error(e);}finally{busy=false;}
+      });
+    }
+    async function loadAssist(){
+      const chooser=$('archive-assist-chat');if(!valid()||!chooser||!box.peerRecovery)return;
+      const c=chat(chooser.value);if(!c?.archived)return;
+      const stamp=++assistRequest,area=$('archive-assist-status');
+      area.innerHTML='<p class="dialogcopy">正在读取协助状态…</p>';
+      try{
+        const state=await box.peerRecovery.status(c);
+        if(!valid()||stamp!==assistRequest)return;
+        const outgoing=state.outgoing,incoming=state.incoming,peer=directPeer(c);
+        area.innerHTML=`${outgoing?`<p class="dialogcopy">已向 ${esc(peer.displayName)} 发出请求。已收到 ${Number(outgoing.grantedMessages)||0} 条历史消息的解密授权。</p><button class="secondarybtn" id="archive-load-grants">刷新并读取已恢复的消息</button>`:'<button class="secondarybtn" id="archive-request-assist">邀请好友协助恢复</button>'}${incoming?`<div class="policybox"><strong>${esc(peer.displayName)} 请求恢复双方的旧私聊</strong><p>将本机能验证的共同历史重新授权给对方。仅分享这段共同的私聊；不会分享私人笔记、其他聊天或旧恢复码。已有 ${Number(incoming.grantedMessages)||0} 条消息获授权。</p><button class="sendbtn" id="archive-grant-assist">协助恢复共同历史</button><p class="dialogcopy" id="archive-grant-progress" aria-live="polite"></p><button class="secondarybtn" id="archive-grant-stop" hidden>停止</button></div>`:''}<button class="secondarybtn" id="archive-refresh-assist">刷新协助状态</button>`;
+        if($('archive-refresh-assist'))$('archive-refresh-assist').onclick=()=>run(loadAssist);
+        if($('archive-load-grants'))$('archive-load-grants').onclick=()=>run(async()=>{await loadAssist();if(valid()){await refreshArchiveHistory();toast('已重新读取历史。');}});
+        if($('archive-request-assist'))$('archive-request-assist').onclick=()=>run(async()=>{
+          if(busy||!valid())return;const button=$('archive-request-assist');busy=true;button.disabled=true;error('');
+          try{await box.peerRecovery.request(c);if(valid()){toast('恢复请求已发送，请好友打开归档私聊中的恢复入口。');await loadAssist();}}
+          catch(e){error(e);}finally{busy=false;if(button.isConnected)button.disabled=false;}
+        });
+        if($('archive-grant-assist'))$('archive-grant-assist').onclick=()=>run(async()=>{
+          if(busy||!valid())return;busy=true;error('');
+          const button=$('archive-grant-assist'),stop=$('archive-grant-stop'),progress=$('archive-grant-progress'),refresh=$('archive-refresh-assist');
+          button.disabled=true;chooser.disabled=true;if(refresh)refresh.disabled=true;stop.hidden=false;controller=new AbortController();const signal=controller.signal;transfers.add(controller);
+          stop.onclick=()=>controller?.abort();
+          let before=null,granted=0,skipped=0,attachmentSkipped=0,checked=0;
+          try{
+            progress.textContent='正在核验并准备共同历史…';
+            await box.prepareChat(c,reviewTrust);
+            while(valid()&&!signal.aborted){
+              const page=await api(`/api/chats/${encodeURIComponent(c.id)}/messages?limit=50${before?'&before='+encodeURIComponent(before):''}`,{signal});
+              const rows=(page.messages||[]).map(normalizeMessage);if(!rows.length)break;
+              const result=await box.peerRecovery.grant(c,rows,{signal,approveTrust:reviewTrust,onProgress:state=>{
+                if(valid()&&!signal.aborted)progress.textContent=`已检查 ${checked+(Number(state.processed)||0)} 条，授权 ${granted+(Number(state.granted)||0)} 条${state.chunkCount?' · 正在核验附件 '+state.chunkIndex+'/'+state.chunkCount:''}。`;
+              }});
+              if(!valid()||signal.aborted)break;
+              checked+=rows.length;granted+=Number(result.granted)||0;skipped+=Number(result.skipped)||0;attachmentSkipped+=Number(result.attachmentSkipped)||0;
+              progress.textContent=`已检查 ${checked} 条，授权 ${granted} 条，略过 ${skipped} 条${attachmentSkipped?'，'+attachmentSkipped+' 个附件暂不能分享':''}。`;
+              if(!page.hasMore||before===rows[0].seq)break;before=rows[0].seq;
+            }
+            if(valid()&&!signal.aborted){toast(`历史协助完成：授权 ${granted} 条消息${skipped?'，略过 '+skipped+' 条':''}${attachmentSkipped?'，'+attachmentSkipped+' 个附件未恢复':''}。`);await loadAssist();}
+          }catch(e){if(!signal.aborted)error(e);}finally{
+            transfers.delete(controller);controller=null;busy=false;if(button.isConnected)button.disabled=false;if(chooser.isConnected)chooser.disabled=false;if(stop.isConnected)stop.hidden=true;if(refresh?.isConnected)refresh.disabled=false;
+          }
+        });
+      }catch(e){if(valid()&&stamp===assistRequest)area.innerHTML=`<p class="dialogcopy">${esc(e.message)}</p><button class="secondarybtn" id="archive-refresh-assist">重试</button>`;if($('archive-refresh-assist'))$('archive-refresh-assist').onclick=()=>run(loadAssist);}
+    }
+    if($('archive-assist-chat'))$('archive-assist-chat').onchange=()=>run(loadAssist);
+    await Promise.allSettled([loadOwn().catch(error),loadAssist()]);
+  }
   function securitySettings() {
-    if (!cryptoBox) return;
-    const box = cryptoBox, generation = epoch, vault = vaultVersion, selectedChat = chat();
-    const version = openDialog('聊天加密与恢复',`<div class="settingsrow"><span>此设备</span><strong>${box.ready ? '已解锁' : '已锁定'}</strong></div><div class="security-code"><strong>我的安全码</strong><code id="own-fingerprint">${esc(formatFingerprint(box.fingerprint)) || '尚未建立加密身份'}</code><small>这是本账户完整的公钥指纹，可以与朋友核对；它不能解锁聊天。</small></div><div class="profile-avatar-tools"><button class="secondarybtn" id="fingerprint-copy" ${box.fingerprint ? '' : 'disabled'}>复制安全码</button>${selectedChat ? '<button class="secondarybtn" id="view-chat-security">核对当前会话安全码</button>' : ''}</div><div class="security-code"><strong>我的恢复码</strong><p id="local-recovery-mask" class="dialogcopy">${box.ready ? '恢复码已遮盖，点击下方按钮在本机查看。' : '先用原恢复码解锁此设备，再查看和复制。服务器和管理员无法找回恢复码。'}</p><textarea class="recovery-code" id="local-recovery-code" aria-label="我的恢复码" readonly spellcheck="false" autocomplete="off" hidden></textarea><small>恢复码不是登录密码。持有码的人可以解锁你的加密聊天，请勿分享。</small></div><div class="profile-avatar-tools"><button class="secondarybtn" id="local-recovery-reveal" aria-controls="local-recovery-code" aria-expanded="false">${box.ready ? '查看恢复码' : '解锁后查看恢复码'}</button><button class="secondarybtn" id="local-recovery-copy" disabled>复制恢复码</button></div><p class="dialogcopy">恢复码只在本机查看与复制，不会上传。加密恢复文件仍需要此码解锁；重置登录密码不能解锁聊天。</p><div class="settingsrow"><span>加密恢复文件</span><button id="backup-export" ${box.identity ? '' : 'disabled'}>下载备份</button></div><div class="settingsrow"><span>当前设备</span><button id="security-lock-toggle">${box.ready ? '立即锁定' : '解锁聊天'}</button></div><div class="settingsrow"><span>可信设备</span><button id="remember-device" ${box.ready ? '' : 'disabled'}>记住此设备</button></div><div class="settingsrow"><span>共用设备</span><button id="forget-device">忘记此设备并锁定</button></div><p class="dialogcopy">正文、引用和附件在客户端加密。账户资料、头像、会话名称、成员关系与时间大小属于服务器可见元数据。旧版历史会标记为未加密；AI 提问与指定前文直接交给配置的模型服务商，不能视为仅聊天双方可见。</p>`);
-    const valid = () => dialogCurrent(version) && box === cryptoBox && generation === epoch && vault === vaultVersion;
-    const codeField = $('local-recovery-code'), mask = $('local-recovery-mask'), reveal = $('local-recovery-reveal'), copy = $('local-recovery-copy');
-    const hideCode = () => { codeField.value = ''; codeField.hidden = true; mask.hidden = false; copy.disabled = true; reveal.setAttribute('aria-expanded','false'); reveal.textContent = box.ready ? '查看恢复码' : '解锁后查看恢复码'; };
-    // The recovery code stays in the unlocked CryptoBox until the user asks to
-    // see it. Never put it in HTML, storage, logs, or a network request here.
-    const onVisibility = () => { if (document.visibilityState === 'hidden') hideCode(); };
-    document.addEventListener('visibilitychange',onVisibility);
-    $('dialog').addEventListener('close',() => { hideCode(); document.removeEventListener('visibilitychange',onVisibility); },{once:true});
-    reveal.onclick = () => run(async () => {
-      if (!valid()) return;
-      if (!box.ready) { $('dialog').close(); await unlockAndRefresh(); if (box === cryptoBox && generation === epoch && box.ready) securitySettings(); return; }
-      if (!codeField.hidden) { hideCode(); return; }
-      if (typeof box.code !== 'string' || !/^[0-9A-F]{64}$/.test(box.code)) throw new Error('本机未持有恢复码，请先锁定，再用原恢复码解锁。');
-      codeField.value = box.code.match(/.{1,8}/g).join('-'); codeField.hidden = false; mask.hidden = true; copy.disabled = false; reveal.textContent = '隐藏恢复码'; reveal.setAttribute('aria-expanded','true');
-    });
-    copy.onclick = () => run(async () => {
-      if (!valid() || !box.ready || codeField.hidden || !codeField.value) { hideCode(); return; }
-      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(codeField.value); if (valid() && box.ready) toast('恢复码已复制，请妥善保存，勿分享。'); }
-      else { codeField.focus(); codeField.select(); toast('请复制已选中的恢复码，勿分享。'); }
-    });
-    $('fingerprint-copy').onclick = () => run(async () => {
-      if (!valid() || !box.fingerprint) return;
-      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(formatFingerprint(box.fingerprint)); if (valid()) toast('安全码已复制，可通过可信渠道与朋友核对。'); }
-      else { const range = document.createRange(); range.selectNodeContents($('own-fingerprint')); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); toast('请复制已选中的完整安全码。'); }
-    });
-    if ($('view-chat-security')) $('view-chat-security').onclick = () => { hideCode(); run(() => encryptionDetails(selectedChat)); };
-    $('backup-export').onclick = () => run(exportRecovery);
-    $('security-lock-toggle').onclick = () => run(async () => { if (!valid()) return; hideCode(); if (box.ready) await lockChat(); else { await unlockAndRefresh(); if (box === cryptoBox && generation === epoch && box.ready) securitySettings(); } });
-    $('remember-device').onclick = () => run(async () => { if (!valid() || !box.ready) return; await box.rememberDevice(); if (valid()) toast('已用本机密钥保护恢复码，此设备可自动解锁。'); });
-    $('forget-device').onclick = () => run(async () => { await lockChat(true); toast('此设备已锁定，自动解锁信息已移除。'); });
+    if(!cryptoBox)return;
+    const box=cryptoBox,generation=epoch,vault=vaultVersion,selectedChat=chat();
+    const version=openDialog('聊天加密',`<div class="settingsrow"><span>此设备</span><strong>${box.ready?'已解锁':'已锁定'}</strong></div><div class="security-code"><strong>我的安全码</strong><code id="own-fingerprint">${esc(formatFingerprint(box.fingerprint))||'尚未建立加密身份'}</code><small>用于和朋友核对身份，不需要背诵或保存。</small></div><div class="profile-avatar-tools"><button class="secondarybtn" id="fingerprint-copy" ${box.fingerprint?'':'disabled'}>复制安全码</button>${selectedChat?'<button class="secondarybtn" id="view-chat-security">核对当前会话安全码</button>':''}</div><div class="settingsrow"><span>密钥保护</span><strong>${box.passwordAccess?'账号密码':'待升级'}</strong></div><div class="settingsrow"><span>当前设备</span><button id="security-lock-toggle">${box.ready?'立即锁定':'解锁聊天'}</button></div><div class="settingsrow"><span>可信设备</span><button id="remember-device" ${box.ready?'':'disabled'}>记住此设备</button></div><div class="settingsrow"><span>共用设备</span><button id="forget-device">忘记此设备并锁定</button></div><p class="dialogcopy">登录密码也用于保护加密密钥，不再需要恢复码。正文、引用和附件仍在客户端加密。请使用强密码并保护服务器；能取得登录密码与加密密钥备份的一方可能解密聊天。</p>`);
+    const valid=()=>dialogCurrent(version)&&box===cryptoBox&&generation===epoch&&vault===vaultVersion;
+    if(archiveRecoveryAvailable){
+      const row=document.createElement('div');row.className='settingsrow';row.innerHTML='<span>归档聊天</span><button id="archived-recovery-settings">恢复旧记录</button>';
+      $('security-lock-toggle').closest('.settingsrow').before(row);
+      $('archived-recovery-settings').onclick=()=>run(()=>archiveRecoverySettings(selectedChat));
+    }
+    $('fingerprint-copy').onclick=()=>run(async()=>{if(!valid()||!box.fingerprint)return;if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(formatFingerprint(box.fingerprint));if(valid())toast('安全码已复制。');}else{const range=document.createRange();range.selectNodeContents($('own-fingerprint'));const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(range);}});
+    if($('view-chat-security'))$('view-chat-security').onclick=()=>run(()=>encryptionDetails(selectedChat));
+    $('security-lock-toggle').onclick=()=>run(async()=>{if(!valid())return;if(box.ready)await lockChat();else{await unlockAndRefresh();if(box===cryptoBox&&generation===epoch&&box.ready)securitySettings();}});
+    $('remember-device').onclick=()=>run(async()=>{if(!valid()||!box.ready)return;await box.rememberDevice();if(valid())toast('此设备已记住，下次登录可自动解锁。');});
+    $('forget-device').onclick=()=>run(async()=>{await lockChat(true);toast('此设备已锁定，自动解锁信息已移除。');});
   }
   function accountSettings() {
     if (!user) return;
-    openDialog('账户与设置',`<div class="settingsrow"><span>账户</span><strong>@${esc(user.username)}${user.role === 'admin' ? ' · 管理员' : ''}</strong></div><form id="name-form" class="account-form"><label>昵称<input id="display-name" value="${esc(user.displayName)}" maxlength="40" required></label><button class="secondarybtn">保存昵称</button></form><div class="settingsrow"><span>我的头像</span><button id="avatarsettings">更换头像</button></div><div class="settingsrow"><span>字体与书法</span><button id="fontsettings">预览与选择</button></div><div class="settingsrow"><span>账户安全</span><button id="passwordsettings">修改密码</button></div><div class="settingsrow"><span>聊天加密与恢复</span><button id="encryption-settings">安全设置</button></div><div class="settingsrow"><span>山岚的长期记忆</span><button id="memory-settings">查看与管理</button></div>${user.role === 'admin' ? '<div class="settingsrow"><span>邀请朋友加入</span><button id="invite-settings">管理邀请码</button></div><div class="settingsrow"><span>山岚 AI</span><button id="ai-settings">模型设置</button></div>' : ''}<p class="dialogcopy">新消息以密文保存在服务器；本机草稿和待发送内容也按账户加密保存。</p><div class="dialogactions"><button class="secondarybtn" id="logout">退出登录</button></div>`);
+    openDialog('账户与设置',`<div class="settingsrow"><span>账户</span><strong>@${esc(user.username)}${user.role === 'admin' ? ' · 管理员' : ''}</strong></div><form id="name-form" class="account-form"><label>昵称<input id="display-name" value="${esc(user.displayName)}" maxlength="40" required></label><button class="secondarybtn">保存昵称</button></form><div class="settingsrow"><span>我的头像</span><button id="avatarsettings">更换头像</button></div><div class="settingsrow"><span>字体与书法</span><button id="fontsettings">预览与选择</button></div><div class="settingsrow"><span>账户安全</span><button id="passwordsettings">修改密码</button></div><div class="settingsrow"><span>聊天加密</span><button id="encryption-settings">安全设置</button></div><div class="settingsrow"><span>山岚的长期记忆</span><button id="memory-settings">查看与管理</button></div>${user.role === 'admin' ? '<div class="settingsrow"><span>邀请朋友加入</span><button id="invite-settings">管理邀请码</button></div><div class="settingsrow"><span>山岚 AI</span><button id="ai-settings">模型设置</button></div>' : ''}<p class="dialogcopy">新消息以密文保存在服务器；本机草稿和待发送内容也按账户加密保存。</p><div class="dialogactions"><button class="secondarybtn" id="logout">退出登录</button></div>`);
     $('name-form').onsubmit = event => { event.preventDefault(); run(async () => { const result = await api('/api/me',{method:'PATCH',body:{displayName:$('display-name').value.trim()}}); updateUser(result.user); toast('昵称已保存。'); }); };
     $('avatarsettings').onclick = () => window.YuetiAvatar.open(); $('fontsettings').onclick = () => window.YuetiFonts.openPicker(); $('passwordsettings').onclick = passwordSettings;
     $('encryption-settings').onclick = securitySettings;
