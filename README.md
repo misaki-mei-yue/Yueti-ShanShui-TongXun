@@ -3,7 +3,8 @@
 水墨山水风格的端到端加密通讯软件（Windows / Android / 网页 + 自托管服务器）。
 An ink-landscape styled end-to-end encrypted messenger (Windows / Android / Web + self-hosted server).
 
-当前版本 / Current version: **1.5.1** — 安装包见 / binaries: [Releases](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.5.1)
+服务器、网页与 Windows / Server, Web & Windows: **1.5.1** — [完整安装包 / Full release](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.5.1)
+Android: **1.5.2** — [安卓启动热修复 / Android startup hotfix](https://github.com/misaki-mei-yue/Yueti-ShanShui-TongXun/releases/tag/v1.5.2)（仅需覆盖安装 APK，不需要升级服务器 / APK update only）
 
 ## 目录 / Layout
 
