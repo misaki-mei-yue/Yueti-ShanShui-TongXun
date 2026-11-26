@@ -17,14 +17,13 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) fail(400, `${label}格式不正确`);
   };
   function currentRow() { return q('SELECT * FROM ai_shared_configurations ORDER BY revision DESC LIMIT 1'); }
-  function activeRow() {
-    const row = currentRow();
+  function activeMetadata(row) {
     if (!row) return null;
     const p = JSON.parse(row.payload), current = q('SELECT fingerprint FROM identities WHERE user_id=?', p.ownerId);
     // A reset does not erase the original signed chain or disclose its old key.
-    return current?.fingerprint === p.ownerFingerprint ? row : null;
+    return current?.fingerprint === p.ownerFingerprint ? p : null;
   }
-  function configuration(row = activeRow()) { return row ? { payload: JSON.parse(row.payload), signature: row.signature, ciphertext: row.ciphertext } : null; }
+  function configuration(row = currentRow()) { const payload = activeMetadata(row); return payload ? { payload, signature: row.signature, ciphertext: row.ciphertext } : null; }
   function historicalSigner(payload) {
     return q('SELECT user_id AS userId,fingerprint,public_key AS publicKey FROM historical_identities WHERE user_id=? AND fingerprint=?', payload.ownerId, payload.ownerFingerprint);
   }
@@ -35,7 +34,10 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     return { payload, signature: row.signature, hash: row.config_hash, ...(signer ? { signer } : {}) };
   }); }
   function hasHistory() { return !!currentRow(); }
-  function currentMetadata() { const row = activeRow(); return row ? JSON.parse(row.payload) : null; }
+  function currentMetadata() {
+    const row = q('SELECT payload FROM ai_shared_configurations ORDER BY revision DESC LIMIT 1');
+    return activeMetadata(row);
+  }
   function validateBaseUrl(value, serverOrigin) {
     if (typeof value !== 'string' || value.length > 500) fail(400, 'AI 接口地址格式不正确');
     let url; try { url = new URL(value); } catch { fail(400, 'AI 接口地址格式不正确'); }
@@ -98,8 +100,8 @@ function createSharedConfigurationStore({ db, serverId, canonical, fail, verifyD
     db.prepare('UPDATE ai_shared_configurations SET ciphertext=NULL WHERE revision<?').run(signed.payload.revision);
   }
   function authorized(userId) { const payload = currentMetadata(); return !!payload?.recipients.some(recipient => recipient.userId === userId && q('SELECT fingerprint FROM identities WHERE user_id=?', userId)?.fingerprint === recipient.fingerprint); }
-  function view(userId, active) {
-    const payload = currentMetadata(), granted = !!payload && authorized(userId);
+  function view(userId, active, allowed = true) {
+    const payload = currentMetadata(), granted = !!payload && allowed && authorized(userId);
     return { mode: active ? 'shared_direct' : null, enabled: !!(active && granted && payload.enabled), authorized: !!(active && granted), pending: !!(active && !granted), configuration: active && granted ? configuration() : null, history: active && granted ? history() : [] };
   }
   return { validate, commit, configuration, history, hasHistory, currentMetadata, authorized, view };

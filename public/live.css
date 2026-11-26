@@ -122,7 +122,12 @@ body.dark .legacy-tag { background:#544633; color:#efd29d; }
 .quickactions,.quickactions button { font-size:11px; }
 .composertools { margin-top:1px; }
 .composer .mention { min-height:32px; padding:4px 10px; color:var(--accent); border:1px solid var(--line); background:var(--panel); white-space:nowrap; }
-.composer .mention:disabled { color:var(--muted); }
+.composer .mention:disabled,.composer #mention[data-available="false"] { color:var(--muted); }
+#detail-ai .toggleline { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+#detail-ai .toggleline input { width:auto; }
+#detail-ai button { margin:6px 8px 0 0; }
+.ai-current-scope { outline:1px solid var(--accent); outline-offset:-1px; }
+#ai-show-scope { color:var(--accent); text-decoration:underline; }
 .composer .ai-search { display:inline-flex; align-items:center; gap:4px; }
 .composer .ai-search svg { width:15px; height:15px; }
 .composer .ai-search[aria-pressed="true"],#compose-search[aria-pressed="true"] { background:var(--soft); border-color:var(--accent); color:var(--accent); }
@@ -277,6 +282,7 @@ body.dark .legacy-tag { background:#544633; color:#efd29d; }
 #archive-assist-status > button,#archive-assist-status .policybox button { margin:8px 8px 0 0; }
 #archive-assist-status .policybox { margin-top:12px; }
 #archive-assist-chat { margin-bottom:4px; }
+#thread-recovery button { color:var(--accent); font-size:12px; white-space:nowrap; padding:5px 7px; }
 #archive-own input[type="password"] { font-family:var(--ui-font); }
 .ai-authorized-users .choice-user span { min-width:0; overflow-wrap:anywhere; }
 #ai-endpoint-review { overflow-wrap:anywhere; white-space:pre-wrap; }

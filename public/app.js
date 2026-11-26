@@ -10,6 +10,7 @@ import { EMOJI_CHOICES, EncryptedEmoticonStore, validateRasterImage } from './em
 import { DEFAULT_STICKERS, loadDefaultSticker } from './default-stickers.mjs';
 import { uploadAttachment, downloadAttachment as downloadChunkedAttachment } from './attachments.mjs';
 import { createFileSink as openFileSink } from './file-save.mjs';
+import { indexChatThreads, threadSummary } from './chat-threads.mjs';
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
@@ -52,29 +53,54 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     return {code:value.code,...(Number.isInteger(value.upstreamStatus) && value.upstreamStatus >= 100 && value.upstreamStatus <= 599 ? {upstreamStatus:value.upstreamStatus} : {}),...(typeof value.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value.requestId) ? {requestId:value.requestId} : {})};
   }
   let user = null, chats = [], current = null, filter = 'all', epoch = 0, selection = 0, dialogVersion = 0, chatRevision = 0;
-  let cryptoBox = null, serverId = '', archiveRecoveryAvailable = false, persistTimer, persistVersion = 0, persistCommitted = 0, restoreVersion = 0, vaultVersion = 0, securityResolve = null, trustResolve = null, restoring = false, securityTransition = false;
+  let cryptoBox = null, serverId = '', archiveRecoveryAvailable = false, archiveKeySync = false, persistTimer, persistVersion = 0, persistCommitted = 0, restoreVersion = 0, vaultVersion = 0, securityResolve = null, trustResolve = null, restoring = false, securityTransition = false;
   const objectURLs = new Set(), aiJobs = new Map(), transfers = new Set();
   const outgoingJobs = new Map();
   const aiPreparing = new Set(), aiStates = new Map();
-  let aiPreferences = {};
+  let aiPreferences = {}, savedRevision = null, savedRead = 0;
   let aiMemoryStore = null, aiMemoryBox = null;
   const memoryUpdates = new Set();
   let messages = new Map(), hasMore = new Map(), requests = new Map(), drafts = {}, pending = [], quotes = {}, attachments = new Map(), rawPending = new Map(), saved = new Set();
-  const chatSecurityErrors = new Map();
+  const chatSecurityErrors = new Map(), archiveGrantStamps = new Map();
   let source = null, refreshTimer = null, pollTimer = null, refreshing = false, refreshAgain = false, toastTimer, authMode = 'login', needsSetup = false;
   let storedKey = '', connected = false, retryAttachmentId = null;
   let nativeNotificationState=null,pendingNotificationChat=null;
   let sensitiveDialogCleanup = null;
   let activeView = 'chat', contactRevision = 0, contactController = null, contactBusy = false, contactError = '', contactUsers = [], contactRequests = [], directoryUsers = [], contactFilter = '', contactMode = 'friends', contactSubmittedQuery = '', contactSearchComplete = false;
   const sessionChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('shanshui:session:v1') : null;
-  const chat = (id = current) => chats.find(c => String(c.id) === String(id));
+  const chat = (id = current) => chatThreads().byId.get(String(id));
   const normalizeChat = c => ({...c,id:String(c.id),members:(c.members || []).map(u => ({...u,id:String(u.id)}))});
   const normalizeMessage = m => ({...m,id:String(m.id),chatId:String(m.chatId),senderId:String(m.senderId)});
   function upsertChat(value) { const c = normalizeChat(value); chatRevision++; chats = [...chats.filter(old => old.id !== c.id),c]; renderList(); return c; }
-  const isAI = c => c && !c.archived && (c.kind === 'ai' || c.kind === 'direct' || c.members.some(m => m.id === 'ai'));
+  const displayKind = c => c && !c.threadKey && threadOf(c.id)?.historicalGroup ? 'group' : c?.displayKind || c?.kind;
+  const isAI = c => c && !c.archived && (c.aiAvailable ?? (c.kind === 'ai' || c.kind === 'direct' || c.members.some(m => m.id === 'ai')));
   const canEdit = c => c && !c.archived && String(c.ownerId) === user?.id;
-  const friendshipBlocked = c => c?.kind === 'direct' && c.canMessage !== true;
+  const friendshipBlocked = c => displayKind(c) === 'direct' && c.canMessage !== true;
+  const initialChat = () => chats.find(c => !c.archived && !(c.kind === 'ai' && c.aiAvailable === false)) || chats.find(c => !c.archived) || chats[0];
   const directPeer = c => c?.members.find(member => member.id !== user?.id && member.id !== 'ai');
+  let indexedRooms, indexedUser, threadIndex;
+  function chatThreads() {
+    if (indexedRooms !== chats || indexedUser !== user?.id) {
+      indexedRooms = chats; indexedUser = user?.id;
+      threadIndex = indexChatThreads(chats,indexedUser);
+    }
+    return threadIndex;
+  }
+  const threadOf = (id = current) => chatThreads().byRoom.get(id);
+  const threadVisible = id => Boolean(current && threadOf(current)?.rooms.some(room => room.id === id));
+  function threadMessages(id = current) {
+    const rooms = threadOf(id)?.rooms || [];
+    if (rooms.length <= 1) return messages.get(id) || [];
+    return rooms.flatMap(room => messages.get(room.id) || []).sort((a,b) => a.seq - b.seq);
+  }
+  function sameDirectAudience(left,right,message) {
+    if (displayKind(left) !== 'direct' || displayKind(right) !== 'direct') return false;
+    const humans = room => room.members.filter(member => member.id !== 'ai').map(member => member.id).sort();
+    const a = humans(left), b = humans(right);
+    const original = message._verifiedManifest?.payload?.members;
+    return a.length === 2 && b.length === 2 && a[0] === b[0] && a[1] === b[1]
+      && a.every(id => original?.some(member => member.userId === id));
+  }
   function toast(value) { $('toast').textContent = value; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; },4500); }
   function activeNotificationChat() {return cryptoBox?.ready&&document.visibilityState==='visible'&&activeView==='chat'&&(innerWidth>720||$('app').classList.contains('mobile-chat'))?current:null;}
   async function syncNativeNotifications(extra={}) {
@@ -136,12 +162,13 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     for (const controller of transfers) controller.abort(); transfers.clear();outgoingJobs.clear();
     for (const url of objectURLs) URL.revokeObjectURL(url); objectURLs.clear();
     messages = new Map(); hasMore = new Map(); requests = new Map(); drafts = {}; pending = []; quotes = {}; attachments = new Map(); rawPending = new Map(); saved = new Set();
-    chatSecurityErrors.clear();
+    chatSecurityErrors.clear(); archiveGrantStamps.clear(); savedRevision = null; savedRead++;
+    indexedRooms = null; indexedUser = null; threadIndex = null;
     $('input').value = ''; $('messages').replaceChildren(); if ($('new-messages')) $('new-messages').hidden = true; $('details').replaceChildren(); $('fileinput').value = ''; $('photoinput').value = ''; $('search').value = '';
     $('quotetext').textContent = ''; $('attachmentname').textContent = ''; $('quote').hidden = true; $('attachment').hidden = true;
     $('dialog').close(); $('dialogcontent').replaceChildren(); $('trust-dialog').close(); $('trust-content').replaceChildren();
     if (trustResolve) { trustResolve(false); trustResolve = null; }
-    chats = chats.map(c => ({...c,lastMessage:c.lastMessage ? {id:c.lastMessage.id,createdAt:c.lastMessage.createdAt,text:'',locked:true} : null}));
+    chats = chats.map(c => ({...c,lastMessage:c.lastMessage ? {id:c.lastMessage.id,seq:c.lastMessage.seq,createdAt:c.lastMessage.createdAt,text:'',locked:true} : null}));
   }
   function clearSession() {
     if(user&&window.YuetiNative?.notifications)Promise.resolve(window.YuetiNative.notifications({enabled:false,userId:user.id,activeChatId:null})).catch(()=>{});
@@ -175,7 +202,11 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         const parts=[];let length=0;const maxBytes=Number.isSafeInteger(options.maxBytes)?Math.max(1,Math.min(25*1024*1024,options.maxBytes)):8*1024*1024;
         try { for(;;){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>maxBytes){await reader.cancel();throw new Error('附件加密数据超过允许的大小。');}parts.push(value);}result=new Uint8Array(length);let offset=0;for(const part of parts){result.set(part,offset);offset+=part.byteLength;} }
         finally{for(const part of parts)part.fill(0);reader.releaseLock();}
-      } else result = await response.json().catch(() => ({}));
+      } else if (response.status===204 || response.status===205) result={};
+      else result = await response.json().catch(() => {
+        if(response.ok) throw Object.assign(new Error('没有收到完整的服务器响应，请重试。'),{retryable:true});
+        return {};
+      });
       if (startEpoch !== epoch) throw Object.assign(new Error('账户已切换。'),{stale:true});
       if (!response.ok) {
         if (response.status === 409 && result.error === '账户已在其他窗口切换，请刷新后重试') {
@@ -188,8 +219,8 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       }
       return result;
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('请求超时。消息可安全重试，不会重复发送。');
-      if (error instanceof TypeError) throw new Error('无法连接服务器，请检查网络后重试。');
+      if (error.name === 'AbortError') throw Object.assign(new Error('请求超时。消息可安全重试，不会重复发送。'),{retryable:true});
+      if (error instanceof TypeError) throw Object.assign(new Error('无法连接服务器，请检查网络后重试。'),{retryable:true});
       throw error;
     } finally { clearTimeout(timeout); options.signal?.removeEventListener('abort',cancel); }
   }
@@ -244,13 +275,14 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   $('trust-dialog').addEventListener('cancel',event => { event.preventDefault(); const done = trustResolve; trustResolve = null; $('trust-dialog').close(); $('trust-content').replaceChildren(); done?.(false); });
   function showLocked() {
+    $('thread-recovery')?.remove();
     $('input').disabled = true; $('send').disabled = true; $('attach').disabled = true; $('stop').hidden = true; $('quickactions').hidden = true; $('mention').hidden = true;
     $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = '<span>聊天已锁定 · 正文与附件在此设备解锁</span><button id="unlock-shortcut">解锁</button>';
     $('unlock-shortcut').onclick = () => run(unlockAndRefresh);
     $('messages').innerHTML = '<div class="live-empty"><strong>山水依旧，书信已锁</strong><span>输入账号密码，继续阅读与发送。</span><button class="secondarybtn" id="unlock-messages">解锁聊天</button></div>';
     $('unlock-messages').onclick = () => run(unlockAndRefresh); renderList();
   }
-  async function requestSecurity(status = 'locked') {
+  async function requestSecurity(status = 'locked', loginPassword) {
     if (securityResolve) return false;
     const box=cryptoBox,generation=epoch,vault=vaultVersion;
     const result=new Promise(resolve=>{securityResolve=resolve;});
@@ -258,12 +290,13 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const valid=()=>box===cryptoBox&&generation===epoch&&vault===vaultVersion&&$('security-dialog').open;
     const legacy=status==='legacy_locked', fresh=status==='new', migration=status==='migration',changed=status==='identity_changed';
     const title=changed?'确认账户的新加密身份':fresh?'启用加密聊天':migration?'完成账号升级':legacy?'恢复旧账号的聊天功能':'解锁聊天';
-    $('security-content').innerHTML=`<h2 id="security-title">${title}</h2><p class="dialogcopy">${changed?'此账户的加密身份已经在另一台设备重建。请输入账号密码确认新身份，新密钥不能解锁需要旧密钥的历史消息。':legacy?'这是旧版账户，原加密密钥未能自动解锁。若还有旧密钥，可保留原聊天；否则可重新启用，继续使用原账号。':migration?'本机还保留原加密密钥。输入账号密码即可迁移，以后不用再保管恢复码。':'使用账号密码即可启用或解锁聊天，无需额外恢复码。'}</p><form id="unlock-form" class="account-form"><label>账号密码<input id="unlock-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label>${legacy?'<details id="legacy-unlock"><summary>我还有旧版恢复码</summary><label>旧版恢复码（仅迁移使用）<input id="unlock-code" type="password" autocomplete="off" spellcheck="false"></label></details>':''}<label class="inline-check"><input id="unlock-remember" type="checkbox" checked>记住此设备，下次自动解锁</label><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="secondarybtn" id="unlock-later" type="button">稍后</button><button class="sendbtn" id="unlock-confirm">${legacy?'保留原密钥并升级':'继续'}</button></div></form>${legacy?'<details class="memory-clear" id="lost-key-options"><summary>原恢复码已丢失，重新启用聊天</summary><p class="dialogcopy">重建加密身份会保留账号、好友和旧聊天密文。无法取得原密钥的旧消息将不能在此身份下解密；好友需要核对新安全码，旧会话归档。管理员可能需要重新配置山岚。</p><label class="inline-check"><input id="reset-identity-confirm" type="checkbox">我了解旧消息可能无法解密，仍要重新启用</label><button class="secondarybtn" id="reset-identity" disabled>确认重建加密身份</button></details>':''}`;
+    $('security-content').innerHTML=`<h2 id="security-title">${title}</h2><p class="dialogcopy">${changed?'此账户的加密身份已经在另一台设备重建。请输入账号密码确认新身份，新密钥不能解锁需要旧密钥的历史消息。':legacy?'这是旧版账户，原加密密钥未能自动解锁。若还有旧密钥，可保留原聊天；否则可重新启用，继续使用原账号。':migration?'本机还保留原加密密钥。输入账号密码即可迁移，以后不用再保管恢复码。':'使用账号密码即可启用或解锁聊天。'}</p><form id="unlock-form" class="account-form"><label>账号密码<input id="unlock-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label>${legacy?'<details id="legacy-unlock"><summary>我还有旧版恢复码</summary><label>旧版恢复码（仅迁移使用）<input id="unlock-code" type="password" autocomplete="off" spellcheck="false"></label></details>':''}<label class="inline-check"><input id="unlock-remember" type="checkbox" checked>记住此设备，下次自动解锁</label><p id="security-error" class="form-error" role="alert"></p><div class="dialogactions"><button class="secondarybtn" id="unlock-later" type="button">稍后</button><button class="sendbtn" id="unlock-confirm">${legacy?'保留原密钥并升级':'继续'}</button></div></form>${legacy?'<details class="memory-clear" id="lost-key-options"><summary>原恢复码已丢失，重新启用聊天</summary><p class="dialogcopy">重建加密身份会保留账号、好友和旧聊天密文。无法取得原密钥的旧消息将不能在此身份下解密；好友需要核对新安全码，旧会话归档。管理员可能需要重新配置山岚。</p><label class="inline-check"><input id="reset-identity-confirm" type="checkbox">我了解旧消息可能无法解密，仍要重新启用</label><button class="secondarybtn" id="reset-identity" disabled>确认重建加密身份</button></details>':''}`;
+    if (loginPassword) { const field = $('unlock-password'); field.required = false; field.closest('label').hidden = true; }
     $('unlock-later').onclick=()=>finish(false);
     const remember=()=>$('unlock-remember').checked;
     const error=message=>{if(valid())$('security-error').textContent=message;};
     const submit=async reset=>{
-      const button=$(reset?'reset-identity':'unlock-confirm'),password=$('unlock-password').value,keep=remember();
+      const button=$(reset?'reset-identity':'unlock-confirm'),password=loginPassword || $('unlock-password').value,keep=remember();
       if(!password||password.length<8){error('请输入账号密码。');$('unlock-password').focus();return;}
       if(reset&&!$('reset-identity-confirm')?.checked)return;
       button.disabled=true;
@@ -323,6 +356,22 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     catch { warning = '本机已退出；服务器连接失败，会话撤销尚未确认。'; }
     finally { sessionChannel?.postMessage({type:'signed-out'}); clearSession(); showAuth('login',warning); }
   }
+  // Leave room on the mobile transport for incoming events, sends and downloads.
+  // Keep output order even when a previous room needs to fetch an older key.
+  async function mapHistory(rows,read) {
+    const results=new Array(rows.length);
+    const box=cryptoBox, generation=epoch, vault=vaultVersion;
+    let next=0;
+    async function work() {
+      while(next<rows.length) {
+        if(box!==cryptoBox || epoch!==generation || vault!==vaultVersion || !box?.ready) return;
+        const i=next++;
+        results[i]=await read(rows[i]);
+      }
+    }
+    await Promise.all(Array.from({length:Math.min(3,rows.length)},work));
+    return results;
+  }
   async function decodedMessage(c,m) {
     const sourceMessage = normalizeMessage(m);
     if (!cryptoBox?.ready) return {...sourceMessage,text:'',quote:null,file:null,locked:true};
@@ -343,7 +392,9 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         chatSecurityErrors.set(c.id,'加密身份有变化，请核对安全码后继续收发。');
         if (current === c.id) renderHeader();
       }
-      return {...sourceMessage,text:'',quote:null,file:null,decryptError:error.message,_wire:sourceMessage};
+      const retryRead=error.retryable===true || error.status===408 || error.status===429 || error.status>=500;
+      return {...sourceMessage,text:'',quote:null,file:null,decryptError:error.message,
+        ...(retryRead ? {retryReadAfter:Date.now()+5000} : {}),_wire:sourceMessage};
     }
   }
   function showAuth(mode = 'login', error = '') {
@@ -372,7 +423,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (!info.e2eeRequired || typeof info.serverInstanceId !== 'string') throw new Error('此客户端需要山水通讯 1.3 加密服务器，请升级服务端后重试。');
       if (info.friendshipRequired !== true) throw new Error('此客户端需要支持好友申请的山水通讯服务器，请升级服务端后重试。');
       if(info.passwordAccess!==true)throw new Error('请先升级山水通讯服务器到 1.5.0。');
-      serverId = info.serverInstanceId; archiveRecoveryAvailable = info.archiveRecovery === true;
+      serverId = info.serverInstanceId; archiveRecoveryAvailable = info.archiveRecovery === true; archiveKeySync = info.archiveKeySync === true;
       if (needsSetup) { showAuth('setup'); return; }
       try { const me = await api('/api/me'); await enter(me.user); }
       catch (e) { if (e.status === 401) showAuth('login'); else throw e; }
@@ -389,16 +440,16 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if(generation!==epoch||box!==cryptoBox)return;
       if(state.status==='new'&&password){await box.createPasswordIdentity(password,{remember});state={status:'ready'};}
     }catch(error){if(generation!==epoch||box!==cryptoBox)return;toast(error.message);state={status:box.pendingReset?'identity_changed':!box.identity?'new':box.passwordAccess?'locked':box.ready?'migration':'legacy_locked'};}
-    password=undefined;
     if(box.rememberError)toast('此设备无法保存自动解锁信息；下次仍可用账号密码进入。');
     if(generation!==epoch||box!==cryptoBox)return;
-    if(state.status!=='ready'||!box.passwordAccess)await requestSecurity(state.status==='ready'?'migration':state.status);
+    if(state.status!=='ready'||!box.passwordAccess)await requestSecurity(state.status==='ready'?'migration':state.status,password);
+    password=undefined;
     if (generation !== epoch || box !== cryptoBox) return;
     if (box.ready) await loadState();
     await refreshAll();
-    if(user&&!current&&chats.length)await switchChat((chats.find(c=>!c.archived)||chats[0]).id,false);
+    if(user&&!current&&chats.length)await switchChat(initialChat().id,false);
     if (!user) return;
-    if (box.ready) run(async () => { const result = await api('/api/saved'); saved = new Set(result.items.map(i => String(i.message.id))); renderMessages(); });
+    if (box.ready && savedRevision === null) run(async () => { const result = await api('/api/saved'); if (generation !== epoch || box !== cryptoBox || !box.ready) return; saved = new Set(result.items.map(i => String(i.message.id))); renderMessages(); });
     connectEvents();
     refreshNativeNotificationView();if(pendingNotificationChat)run(openNotificationChat);
     clearInterval(pollTimer); pollTimer = setInterval(() => { if (user && document.visibilityState === 'visible') queueRefresh(); },20000);
@@ -421,11 +472,47 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       const result = await api('/api/chats'); if (generation !== epoch || !user) return;
       if (revision !== chatRevision) { refreshAgain = true; return; }
       chats = result.chats.map(normalizeChat);
-      if (cryptoBox?.ready && current && chat()) { const visible = current; renderHeader(); await fetchMessages(visible,false); refreshedChat = visible; if (generation !== epoch || !user) return; }
+      for (const [id,job] of aiJobs) if (!isAI(chat(id)) || chat(id)?.context === 'none') job.abort();
+      if (cryptoBox?.ready && Number.isSafeInteger(result.savedRevision) && savedRevision !== result.savedRevision) {
+        const box = cryptoBox, ids = await api('/api/saved?ids=1');
+        if (generation !== epoch || box !== cryptoBox || !box.ready) return;
+        saved = new Set(ids.ids); savedRevision = result.savedRevision;
+        if (activeView === 'saved' && $('dialog').open) run(() => openSaved(true));
+      }
+      if (archiveKeySync && cryptoBox?.ready) {
+        const box = cryptoBox;
+        const restored = await box.refreshArchivedAccess(result.archiveSyncStamp,chats);
+        if (generation !== epoch || box !== cryptoBox || !box.ready) return;
+        for (const c of chats.filter(c => c.archived)) {
+          const recoveryStamp = String(c.archiveGrantStamp || 0) + '/' + String(c.archiveTrustSynced === true);
+          const accessChanged=restored || archiveGrantStamps.get(c.id)!==recoveryStamp;
+          if (accessChanged || threadVisible(c.id)) {
+            await refreshLoadedArchive(c,box,!accessChanged);
+            if (generation !== epoch || box !== cryptoBox || !box.ready) return;
+            archiveGrantStamps.set(c.id,recoveryStamp);
+          }
+        }
+      }
+      if (cryptoBox?.ready && current && chat()) {
+        const visible = current, c = chat(), box = cryptoBox;
+        const verifiedRevision = box.chains.get(visible)?.length || 0;
+        if (c.e2eeRevision > 0 && (verifiedRevision !== c.e2eeRevision || (c.archived && c.archiveTrustSynced && chatSecurityErrors.has(visible)))) {
+          let error;
+          try { await box.prepareChat(c,approveTrust); } catch (e) { error = e.message; }
+          if (generation !== epoch || box !== cryptoBox || !box.ready) return;
+          if (error) chatSecurityErrors.set(visible,error); else chatSecurityErrors.delete(visible);
+        }
+        if (visible === current) renderHeader();
+        await fetchMessages(visible,false);
+        if (current === visible) await refreshThreadHistory(visible);
+        refreshedChat = visible;
+        if (generation !== epoch || !user) return;
+      }
       if (cryptoBox?.ready) {
         const box = cryptoBox;
-        const previews = await Promise.all(chats.map(async c => [c.id,c.lastMessage ? await decodedMessage(c,c.lastMessage) : null]));
-        if (generation !== epoch || box !== cryptoBox || !box.ready) return;
+        const previewVault=vaultVersion;
+        const previews = await mapHistory(chats,async c => [c.id,c.lastMessage ? await decodedMessage(c,c.lastMessage) : null]);
+        if (generation !== epoch || box !== cryptoBox || !box.ready || previewVault!==vaultVersion) return;
         if (revision !== chatRevision) { refreshAgain = true; return; }
         const byId = new Map(previews); chats = chats.map(c => ({...c,lastMessage:byId.get(c.id)}));
       }
@@ -433,9 +520,13 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (refreshedSelf) { user = {...refreshedSelf}; paintSelf(); }
       renderList();
       if (current && !chat()) { current = null; selection++; renderEmpty(); }
+      if (current && threadOf()?.primary.id !== current && cryptoBox?.ready) {
+        await switchChat(threadOf().primary.id,false);
+        refreshedChat = current;
+      }
       if (!cryptoBox?.ready) showLocked();
       else if (current) { renderHeader(); if (current !== refreshedChat) await fetchMessages(current,false); }
-      else if(chats.length&&activeView!=='people')await switchChat((chats.find(c=>!c.archived)||chats[0]).id,false);
+      else if(chats.length&&activeView!=='people')await switchChat(initialChat().id,false);
       if (activeView === 'people' && !contactBusy && cryptoBox?.ready && !securityTransition) run(() => loadContacts({silent:true}));
       if (source?.readyState === EventSource.OPEN) setConnection(true);
     } catch (e) { if (generation === epoch) setConnection(false); throw e; }
@@ -443,18 +534,18 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   function person(id,c = chat()) { return String(id) === user?.id ? user : c?.members.find(p => p.id === String(id)) || {id:String(id),displayName:String(id) === 'ai' ? '山岚' : '成员'}; }
   function avatar(p) { const url = safeURL(p?.avatarUrl,'/api/avatars/'); return url ? `<img class="avatar-image" src="${esc(url)}" alt="">` : p?.id === 'ai' ? icon('ai') : esc((p?.displayName || p?.username || '我').slice(0,1)); }
-  function chatAvatar(c) { if (c.kind === 'ai') return icon('ai'); if (c.kind === 'group') return icon('mountain'); if (c.kind === 'notes') return '记'; return avatar(c.members.find(p => p.id !== user?.id) || user); }
-  const chatStyle = c => c.kind === 'ai' ? 'ai' : c.kind === 'group' ? 'group' : '';
+  function chatAvatar(c) { if (c.kind === 'ai') return icon('ai'); if (displayKind(c) === 'group') return icon('mountain'); if (c.kind === 'notes') return '记'; return avatar(directPeer(c) || user); }
+  const chatStyle = c => c.kind === 'ai' ? 'ai' : displayKind(c) === 'group' ? 'group' : '';
   function paintSelf() { if (!user) return; setStableHTML($('self-avatar'),avatar(user)); $('self-avatar').title = `${user.displayName} · 更换头像`; }
   function renderList() {
     const q = $('search').value.trim().toLocaleLowerCase();
-    const list = chats.filter(c => (filter === 'all' || filter === 'person' && ['direct','group'].includes(c.kind) || filter === 'ai' && (c.kind === 'ai'||c.members.some(m=>m.id==='ai')) || filter === 'unread' && c.unread > 0) && (!q || c.name.toLocaleLowerCase().includes(q) || cryptoBox?.ready && c.lastMessage?.text?.toLocaleLowerCase().includes(q)));
+    const list = chatThreads().threads.map(threadSummary).filter(c => (filter === 'all' || filter === 'person' && ['direct','group'].includes(displayKind(c)) || filter === 'ai' && displayKind(c) === 'ai' || filter === 'unread' && c.unread > 0) && (!q || c.name.toLocaleLowerCase().includes(q) || cryptoBox?.ready && threadOf(c.id).rooms.some(room => room.lastMessage?.text?.toLocaleLowerCase().includes(q))));
     list.sort((a,b) => Number(!!b.archiveAssistPending)-Number(!!a.archiveAssistPending)||Number(!!a.archived)-Number(!!b.archived)||Number(b.pinned) - Number(a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    stableChildren($('chatlist'),list.length ? list.map(c => `<button class="chatitem ${c.id === current ? 'current' : ''}" data-chat="${esc(c.id)}" ${c.id === current ? 'aria-current="true"' : ''}><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><div class="itemtext"><div class="itemtop"><strong>${esc(c.name)}${c.archived?'<span class="smalltag">归档</span>':''}${c.archiveAssistPending?'<span class="smalltag">恢复请求</span>':''}${c.pinned ? '<span class="smalltag">置顶</span>' : ''}</strong><time>${esc(time(c.updatedAt))}</time></div><div class="preview"><span>${esc(c.lastMessage ? !cryptoBox?.ready || c.lastMessage.locked ? '加密消息 · 解锁后查看' : c.lastMessage.decryptError ? (c.archived ? '旧加密消息 · 可尝试恢复' : '加密消息 · 需核验安全码') : c.lastMessage.file ? `[文件] ${c.lastMessage.file.name}` : c.lastMessage.text || '加密消息' : '开始一段新的对话')}</span>${c.unread ? `<span class="unread">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</div></div></button>`).join('') : '<p class="empty">还没有符合条件的会话。<br>点击右上角 +，开始聊天。</p>','data-chat');
+    stableChildren($('chatlist'),list.length ? list.map(c => `<button class="chatitem ${c.id === current ? 'current' : ''}" data-chat="${esc(c.id)}" ${c.id === current ? 'aria-current="true"' : ''}><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><div class="itemtext"><div class="itemtop"><strong>${esc(c.name)}${c.archived?'<span class="smalltag">归档</span>':''}${c.archiveAssistPending?'<span class="smalltag">恢复请求</span>':''}${c.pinned ? '<span class="smalltag">置顶</span>' : ''}</strong><time>${esc(time(c.updatedAt))}</time></div><div class="preview"><span>${esc(c.lastMessage ? !cryptoBox?.ready || c.lastMessage.locked ? '加密消息 · 解锁后查看' : c.lastMessage.decryptError ? (c.latestArchived ? '旧加密消息 · 可尝试恢复' : '加密消息 · 需核验安全码') : c.lastMessage.file ? `[文件] ${c.lastMessage.file.name}` : c.lastMessage.text || '加密消息' : '开始一段新的对话')}</span>${c.unread ? `<span class="unread">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</div></div></button>`).join('') : '<p class="empty">还没有符合条件的会话。<br>点击右上角 +，开始聊天。</p>','data-chat');
     $('chatlist').querySelectorAll('[data-chat]').forEach(b => { b.onclick = () => run(() => switchChat(b.dataset.chat)); });
   }
   async function switchChat(id,mobile = true,saveDraft = true,review = false) {
-    id = String(id); if (!chat(id)) return;
+    id = threadOf(String(id))?.primary.id; if (!id) return;
     setNavigation('chat');
     if (current && saveDraft) drafts[current] = $('input').value;
     current = id; selection++; $('input').value = typeof drafts[id] === 'string' ? drafts[id] : ''; hideDetails();
@@ -469,8 +560,43 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     renderHeader(); renderCompose();
     // Legacy history remains readable without a manifest. Encrypted records still
     // go through CryptoBox signature/audience verification, with no plaintext fallback.
-    try { await fetchMessages(id,true); if (current === id && selection === version) markRead(); }
+    try {
+      await fetchMessages(id,true);
+      if (current === id && selection === version) { await refreshThreadHistory(id); markRead(); }
+    }
     catch (e) { if (current === id && selection === version && !messages.has(id)) $('messages').innerHTML = `<div class="errorblock">${esc(e.message)}<br><button id="reload-messages" class="secondarybtn">重新加载</button></div>`; if ($('reload-messages')) $('reload-messages').onclick = () => run(() => switchChat(id)); throw e; }
+  }
+  async function refreshLoadedArchive(c,box,temporaryOnly=false) {
+    const locked = (messages.get(c.id) || []).filter(m => m.decryptError && m._wire && (!temporaryOnly || (m.retryReadAfter && m.retryReadAfter<=Date.now())));
+    const at = box.epoch, vault=vaultVersion;
+    for (let offset = 0; offset < locked.length; offset += 12) {
+      const page = locked.slice(offset,offset + 12);
+      const opened = await mapHistory(page,m => decodedMessage(c,m._wire));
+      if (box !== cryptoBox || at !== box.epoch || vault!==vaultVersion || !box.ready) return;
+      const updates = new Map(page.map((original,i) => [original,opened[i]]));
+      const rows = messages.get(c.id);
+      if (rows) messages.set(c.id,rows.map(m => updates.get(m) || m));
+    }
+    if (locked.length && threadVisible(c.id)) renderMessages(false);
+  }
+  async function refreshThreadHistory(primaryId) {
+    const box = cryptoBox, version = selection;
+    const valid = () => current === primaryId && selection === version && box === cryptoBox && box?.ready;
+    for (const room of threadOf(primaryId)?.rooms || []) {
+      if (!valid()) return;
+      if (!room.archived || !archiveKeySync) await refreshLoadedArchive(room,box,true);
+      if (!valid()) return;
+      if (room.id === primaryId || !room.lastMessage) continue;
+      const latest = messages.get(room.id)?.at(-1);
+      const revision = box.chains.get(room.id)?.length || 0;
+      if (latest?.seq === room.lastMessage.seq && revision === room.e2eeRevision) continue;
+      if (room.e2eeRevision && revision !== room.e2eeRevision) {
+        try { await box.prepareChat(room,approveTrust); if (valid()) chatSecurityErrors.delete(room.id); }
+        catch (error) { if (valid()) chatSecurityErrors.set(room.id,error.message); }
+      }
+      if (!valid()) return;
+      await fetchMessages(room.id);
+    }
   }
   async function fetchMessages(id,scroll = false,before = null) {
     if (!cryptoBox?.ready) return;
@@ -490,34 +616,77 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         incoming.unshift(...rows); boundary = rows[0].seq; more = bridge.hasMore;
       }
     }
-    const decrypted = await Promise.all(incoming.map(m => decodedMessage(chat(id),m)));
+    const decrypted = await mapHistory(incoming,m => decodedMessage(chat(id),m));
     if (generation !== epoch || vault !== vaultVersion || box !== cryptoBox || !box.ready || requests.get(key) !== request) return;
     const merged = new Map((messages.get(id) || []).map(m => [m.id,m]));
     decrypted.forEach(m => merged.set(m.id,m)); messages.set(id,[...merged.values()].sort((a,b) => a.seq - b.seq));
     if (before || !prior.length) hasMore.set(id,Boolean(result.hasMore));
     const confirmed = new Set(decrypted.filter(m => m.senderId === user?.id && m._decrypted && pending.some(p => p.clientId === m.clientId && p.envelope?.ciphertext === m._wire?.envelope?.ciphertext)).map(m => m.clientId));
     if (pending.some(p => p.chatId === id && confirmed.has(p.clientId))) { pending = pending.filter(p => !(p.chatId === id && confirmed.has(p.clientId))); storeState(); }
-    if (current === id) { renderMessages(scroll,Boolean(before)); renderCompose(); if ($('app').classList.contains('show-details')) renderDetails(); markRead(); }
+    if (threadVisible(id)) { renderMessages(scroll,Boolean(before)); renderCompose(); if ($('app').classList.contains('show-details')) renderDetails(); markRead(); }
+  }
+  function isAssistantDialog(c) {
+    if (displayKind(c) !== 'ai') return false;
+    if (c.kind === 'ai') return true;
+    const history = cryptoBox?.chains.get(c.id);
+    return c.kind === 'group' && history?.length > 0 && history.every(({payload}) =>
+      payload.members.length === 1 && payload.members[0].userId === user.id);
+  }
+  function hasAIEntry(c) {
+    return c && !c.archived && ['direct','group','ai'].includes(displayKind(c));
+  }
+  function aiAccessLabel(c) {
+    if (friendshipBlocked(c)) return '成为好友后可使用山岚';
+    if (c.aiAccess === 'off') return '管理员尚未启用山岚模型';
+    if (c.aiAccess === 'not-granted') return displayKind(c) === 'group' ? '管理员尚未授权此群使用山岚' : '管理员尚未授权你的账号在私聊中使用山岚';
+    if (c.aiAccess === 'key-pending') return '当前加密身份尚未取得模型授权，请管理员重新保存授权';
+    if (!c.aiAccess && c.aiAvailable === false) return '管理员尚未在这里启用山岚';
+    if (c.aiPausedForMe) return '你已在此会话暂停山岚';
+    if (c.context === 'none') return '本会话已暂停山岚';
+    return '';
   }
   function renderMention() {
     const c = chat(), button = $('mention');
-    button.hidden = !['group','direct'].includes(c?.kind) || !isAI(c);
-    button.disabled = !cryptoBox?.ready || chatSecurityErrors.has(current) || $('input').disabled || c?.context === 'none' || aiJobs.has(current) || aiPreparing.has(current);
-    button.title = !cryptoBox?.ready || chatSecurityErrors.has(current) || $('input').disabled ? '完成聊天加密验证后可使用' : c?.context === 'none' ? '山岚已暂停，可在会话详情启用' : aiJobs.has(current) || aiPreparing.has(current) ? '山岚正在处理，请等待或停止' : '在光标处插入 @山岚，不会立即发送';
+    button.hidden = !hasAIEntry(c) || !['group','direct'].includes(displayKind(c)) || friendshipBlocked(c);
+    if (button.hidden) return;
+    const status = aiAccessLabel(c);
+    const blocked = !cryptoBox?.ready || chatSecurityErrors.has(current) || $('input').disabled;
+    const busy = aiJobs.has(current) || aiPreparing.has(current);
+    button.disabled = Boolean(blocked || busy);
+    button.dataset.available = String(!status);
+    button.title = blocked ? '完成聊天加密验证后可使用' : busy ? '山岚正在处理' : status ? status + '，打开山岚设置' : '在光标处插入 @山岚';
+    button.setAttribute('aria-label',status ? '@山岚，' + button.title : '插入 @山岚');
+    button.setAttribute('aria-controls',status ? 'details' : 'input');
   }
   function renderEmpty() {
+    $('thread-recovery')?.remove();
     $('chatname').textContent = '山水之间'; $('chatsub').textContent = '朋友与 AI，都在这里'; $('headavatar').textContent = '山';
     $('chatpolicy').hidden = true; $('quickactions').hidden = true; $('messages').innerHTML = '<div class="live-empty"><strong>从一句话，开始相聚</strong><span>点击 +，联系朋友、创建小群，或与山岚聊聊。</span></div>';
     $('input').disabled = true; $('send').disabled = true; $('attach').disabled = true; $('mention').hidden = true;
+  }
+  function renderThreadRecovery(c) {
+    const archives = threadOf(c.id)?.rooms.filter(room => room.archived) || [];
+    if (!archives.length || !archiveRecoveryAvailable || c.archived) { $('thread-recovery')?.remove(); return; }
+    let action = $('thread-recovery');
+    if (!action) {
+      action = document.createElement('span'); action.id = 'thread-recovery';
+      const button = document.createElement('button'); button.id = 'restore-archive';
+      button.type = 'button'; action.append(button); $('chatsearch').before(action);
+    }
+    const pendingRequest = archives.find(room => room.archiveAssistPending);
+    const preferred = pendingRequest || archives.find(room => chatSecurityErrors.has(room.id)) || archives[0];
+    action.firstChild.textContent = pendingRequest ? '好友请求恢复' : '恢复旧记录';
+    action.firstChild.onclick = () => run(() => archiveRecoverySettings(preferred));
   }
   function renderHeader() {
     if (securityTransition) return;
     const c = chat(); if (!c) { renderEmpty(); return; }
     refreshNativeNotificationView();
     if (!cryptoBox?.ready) { showLocked(); return; }
+    renderThreadRecovery(c);
     $('input').disabled = false; $('attach').disabled = false; $('emoji').disabled = false;
     $('chatname').textContent = c.name; $('headavatar').className = `avatar ${chatStyle(c)}`; setStableHTML($('headavatar'),chatAvatar(c));
-    $('chatsub').textContent = c.kind === 'group' ? `${c.members.filter(p => p.id !== 'ai').length} 位成员${isAI(c) ? ' · 山岚直连 AI' : ''}` : c.kind === 'ai' ? 'AI 助手 · 此设备直连模型' : c.kind === 'notes' ? '仅自己可见' : '私聊';
+    $('chatsub').textContent = displayKind(c) === 'group' ? `${c.members.filter(p => p.id !== 'ai').length} 位成员${isAI(c) ? ' · 山岚直连 AI' : ''}` : displayKind(c) === 'ai' ? 'AI 助手 · 此设备直连模型' : displayKind(c) === 'notes' ? '仅自己可见' : '私聊';
     if(c.archived){
       $('input').disabled=true;$('attach').disabled=true;$('send').disabled=true;$('emoji').disabled=true;$('quickactions').hidden=true;$('input').placeholder='旧会话已归档，不能继续发送';
       $('chatpolicy').hidden=false;
@@ -526,6 +695,14 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if($('restore-archive'))$('restore-archive').onclick=()=>run(()=>archiveRecoverySettings(c));
       if($('review-archive'))$('review-archive').onclick=()=>run(()=>switchChat(c.id,false,true,true));
       if($('open-successor'))$('open-successor').onclick=()=>run(()=>switchChat(c.successorId));renderMention();return;
+    }
+    if (displayKind(c) === 'ai' && aiAccessLabel(c)) {
+      for (const id of ['input','attach','send','emoji']) $(id).disabled = true;
+      $('quickactions').hidden = true;
+      $('chatpolicy').hidden = false;
+      setStableHTML($('chatpolicy'), `<span>${esc(aiAccessLabel(c))}</span><button id="ai-enable-settings">山岚设置</button>`);
+      $('ai-enable-settings').onclick = showAIDetails;
+      $('input').placeholder = '山岚尚未启用'; renderMention(); return;
     }
     if (friendshipBlocked(c)) {
       $('input').disabled = true; $('attach').disabled = true; $('send').disabled = true; $('emoji').disabled = true; $('quickactions').hidden = true; renderMention();
@@ -538,15 +715,15 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const securityError = chatSecurityErrors.get(c.id);
     if (securityError) {
       $('input').disabled = true; $('attach').disabled = true; $('send').disabled = true; $('quickactions').hidden = true; renderMention();
-      $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>需要核验加密成员 · ${esc(securityError)}</span><button id="retry-encryption">${c.kind === 'group' ? '核验群成员' : '重新验证'}</button>`;
+      $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>需要核验加密成员 · ${esc(securityError)}</span><button id="retry-encryption">${displayKind(c) === 'group' ? '核验群成员' : '重新验证'}</button>`;
       $('retry-encryption').onclick = () => run(() => switchChat(c.id,false,true,true)); return;
     }
-    $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>${isAI(c) ? c.context === 'none' ? '聊天端到端加密 · AI 已暂停' : '聊天端到端加密 · AI 输入由此设备直达模型' : '端到端加密 · 在你的设备解密'}</span>${c.predecessorId?'<button id="open-predecessor">旧聊天记录</button>':''}${isAI(c) ? '<button id="ai-context-shortcut">AI 前文与隐私</button>' : ''}${c.kind==='ai'?'<button id="ai-memory-shortcut">长期记忆</button>':''}<button id="viewpolicy">安全详情</button>`;
-    if ($('open-predecessor')) $('open-predecessor').onclick = () => run(() => switchChat(c.predecessorId));
+    $('chatpolicy').hidden = false; $('chatpolicy').innerHTML = `<span>${isAI(c) ? c.context === 'none' ? '聊天端到端加密 · AI 已暂停' : '聊天端到端加密 · AI 输入由此设备直达模型' : '端到端加密 · 在你的设备解密'}</span>${isAI(c) ? '<button id="ai-context-shortcut">AI 前文与隐私</button>' : ''}${c.kind==='ai'?'<button id="ai-memory-shortcut">长期记忆</button>':''}<button id="viewpolicy">安全详情</button>`;
+
     if ($('ai-context-shortcut')) $('ai-context-shortcut').onclick = () => run(() => showAIContext(c.id));
     if($('ai-memory-shortcut'))$('ai-memory-shortcut').onclick=()=>run(memorySettings);
     $('viewpolicy').onclick = showDetails; $('quickactions').hidden = !isAI(c) || c.context === 'none'; renderMention();
-    $('input').placeholder = c.context === 'none' && isAI(c) ? 'AI 已暂停…' : isAI(c) && ['group','direct'].includes(c.kind) ? '输入消息，@山岚 提问，/生图 画图' : c.kind === 'ai' ? '和山岚聊聊…' : '输入消息…';
+    $('input').placeholder = isAI(c) && c.context !== 'none' && ['group','direct'].includes(displayKind(c)) ? '输入消息，@山岚 提问，/生图 画图' : isAssistantDialog(c) ? '和山岚聊聊…' : '输入消息…';
   }
   let emoticonStore = null, emoticonScope = '', imageLoadCount = 0;
   const imagePreviewCache = new Map(), imagePreviewJobs = new Map(), imageLoadQueue = [], stickerPreviewURLs = new Map(), mediaURLs = new Set();
@@ -731,20 +908,22 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     if (!cryptoBox?.ready) { showLocked(); return; }
     const id = current, c = chat(id), box = $('messages'), view = captureMessageViewport(box), changedChat = box.dataset.renderedChat !== id;
     const priorKeys = new Set([...box.querySelectorAll('.msg')].map(node => node.dataset.messageKey)); box.dataset.renderedChat = id;
-    const list = messages.get(id) || [], queued = pending.filter(p => p.chatId === id);
+    const list = threadMessages(id), rooms = threadOf(id)?.rooms || [], queued = pending.filter(p => p.chatId === id);
+    const byMessageId = new Map(list.map(message => [message.id,message]));
     const all = [...list,...queued.map(p => ({id:`pending:${p.clientId}`,clientId:p.clientId,chatId:id,senderId:user.id,text:p.text,createdAt:p.createdAt,quote:p.quote,file:p.file,kind:p.kind,ai:p.ai,pending:p}))];
-    const messageKey = m => m.clientId ? `client:${m.senderId}:${m.clientId}` : `message:${m.id}`, newRows = all.some(m => !priorKeys.has(messageKey(m)));
-    reconcileMessageRows(box,(hasMore.get(id) ? '<button class="load-earlier" id="load-earlier" data-message-key="earlier">查看更早的消息</button>' : '') + (all.length ? all.map(m => {
-      const p = person(m.senderId,c), mine = m.senderId === user.id && m.kind !== 'ai-result', ai = m.senderId === 'ai' || m.kind === 'ai-result';
+    const messageKey = m => m.clientId ? `client:${m.chatId}:${m.senderId}:${m.clientId}` : `message:${m.id}`, newRows = all.some(m => !priorKeys.has(messageKey(m)));
+    const olderRooms = rooms.filter(room => hasMore.get(room.id));
+    reconcileMessageRows(box,(olderRooms.length ? '<button class="load-earlier" id="load-earlier" data-message-key="earlier">查看更早的消息</button>' : '') + (all.length ? all.map(m => {
+      const sourceRoom = chat(m.chatId), p = person(m.senderId,sourceRoom), mine = m.senderId === user.id && m.kind !== 'ai-result', ai = m.senderId === 'ai' || m.kind === 'ai-result';
       const status = m.pending ? m.pending.status !== 'failed' ? m.pending.progress ? `上传 ${bytes(m.pending.progress.loaded)} / ${bytes(m.pending.progress.total)}` : '正在发送…' : m.pending.error || '发送失败' : m.aiStatus === 'generating' ? '山岚正在思考…' : m.aiStatus === 'failed' ? 'AI 回复失败' : m.aiStatus === 'stopped' ? '已停止生成' : mine ? '已发送' : '';
-      const content = m.decryptError ? `<div class="decrypt-error">无法验证或解密这条消息：${esc(m.decryptError)}</div>` : `${m.quote ? `<div class="inlinequote">${esc(m.quote.senderName)}：${esc(m.quote.text?.slice(0,160))}</div>` : ''}${m.text ? `<div>${esc(m.text)}</div>` : ''}${m.file ? fileMarkup(m.file,m) : ''}${m.pending?.fileName && !m.file ? `<div class="filecaption">${icon('file')}${esc(m.pending.fileName)}</div>` : ''}${!m.text && !m.file && ai ? '<span>…</span>' : ''}`;
-      return `<article class="msg ${mine ? 'mine' : ''} ${ai ? 'ai' : ''}" data-message="${esc(m.id)}" data-client-id="${esc(m.clientId || '')}" data-message-key="${esc(messageKey(m))}"><div class="avatar ${ai ? 'ai' : ''}">${ai ? icon('ai') : avatar(p)}</div><div class="msgbody"><div class="msgmeta"><strong>${m.kind === 'ai-result' ? `山岚 · ${esc(p.displayName)} 分享` : esc(p.displayName)}</strong>${ai ? '<span class="smalltag">AI</span>' : ''}${m.legacy ? '<span class="smalltag legacy-tag">旧版未加密</span>' : ''}<time datetime="${esc(m.createdAt)}" title="${esc(new Date(m.createdAt).toLocaleString('zh-CN'))}">${esc(time(m.createdAt))}</time></div><div class="bubble">${content}</div><div class="msgactions">${status ? `<span class="msgstate ${m.pending?.status === 'failed' || m.aiStatus === 'failed' ? 'failed' : ''}">${esc(status)}</span>` : ''}${m.pending ? m.pending.status === 'failed' ? `<button data-retry="${esc(m.clientId)}" class="failed">重试</button><button data-discard="${esc(m.clientId)}">取消</button>` : `<button disabled>回复</button><button disabled>收藏</button>${isAI(c) && m.text ? '<button disabled>不让 AI 参考</button>' : ''}` : !m.decryptError ? `<button data-reply="${esc(m.id)}">回复</button><button data-save="${esc(m.id)}">${saved.has(m.id) ? '已收藏' : '收藏'}</button>` : ''}</div></div></article>`;
+      const content = m.decryptError ? `<div class="decrypt-error">${m.retryReadAfter ? '暂时无法读取这条消息，连接就绪后会自动重试。' : '无法验证或解密这条消息：'+esc(m.decryptError)}${m.chatId !== id && chatSecurityErrors.has(m.chatId) ? ` <button type="button" data-review-history="${esc(m.chatId)}">核验历史收件人</button>` : ''}</div>` : `${m.quote ? `<div class="inlinequote">${esc(m.quote.senderName)}：${esc(m.quote.text?.slice(0,160))}</div>` : ''}${m.text ? `<div>${esc(m.text)}</div>` : ''}${m.file ? fileMarkup(m.file,m) : ''}${m.pending?.fileName && !m.file ? `<div class="filecaption">${icon('file')}${esc(m.pending.fileName)}</div>` : ''}${!m.text && !m.file && ai ? '<span>…</span>' : ''}`;
+      return `<article class="msg ${mine ? 'mine' : ''} ${ai ? 'ai' : ''}" data-message="${esc(m.id)}" data-client-id="${esc(m.clientId || '')}" data-message-key="${esc(messageKey(m))}"><div class="avatar ${ai ? 'ai' : ''}">${ai ? icon('ai') : avatar(p)}</div><div class="msgbody"><div class="msgmeta"><strong>${m.kind === 'ai-result' ? `山岚 · ${esc(p.displayName)} 分享` : esc(p.displayName)}</strong>${ai ? '<span class="smalltag">AI</span>' : ''}${m.legacy ? '<span class="smalltag legacy-tag">旧版未加密</span>' : ''}<time datetime="${esc(m.createdAt)}" title="${esc(new Date(m.createdAt).toLocaleString('zh-CN'))}">${esc(time(m.createdAt))}</time></div><div class="bubble">${content}</div><div class="msgactions">${status ? `<span class="msgstate ${m.pending?.status === 'failed' || m.aiStatus === 'failed' ? 'failed' : ''}">${esc(status)}</span>` : ''}${m.pending ? m.pending.status === 'failed' ? `<button data-retry="${esc(m.clientId)}" class="failed">重试</button><button data-discard="${esc(m.clientId)}">取消</button>` : `<button disabled>回复</button><button disabled>收藏</button>${isAI(c) && m.text ? '<button disabled>不让 AI 参考</button>' : ''}` : !m.decryptError ? `${!c.archived && (m.chatId === id || sameDirectAudience(c,sourceRoom,m)) ? `<button data-reply="${esc(m.id)}">回复</button>` : ''}<button data-save="${esc(m.id)}">${saved.has(m.id) ? '已收藏' : '收藏'}</button>` : ''}</div></div></article>`;
     }).join('') : `<div class="live-empty" data-message-key="empty"><strong>${c?.kind === 'notes' ? '留下一点想法' : '开始聊聊吧'}</strong><span>${c?.kind === 'ai' ? '此设备直接连接管理员配置的模型。' : '文字、图片和文件，都可以从这里发送。'}</span></div>`));
     if (isAI(c)) {
       const pref = aiPreference(id);
       box.querySelectorAll('.msg[data-message]').forEach(article => {
-        const m = list.find(row => row.id === article.dataset.message);
-        if (!m?._decrypted || m.decryptError || !m.text || m.seq <= pref.cutoffSeq) return;
+        const m = byMessageId.get(article.dataset.message);
+        if (!m?._decrypted || m.chatId !== id || m.decryptError || !m.text || m.seq <= pref.cutoffSeq) return;
         const excluded = pref.excludedIds.includes(m.id), button = article.querySelector('[data-ai-exclude]') || document.createElement('button');
         button.dataset.aiExclude = m.id; button.textContent = excluded ? '已排除 · 恢复 AI 参考' : '不让 AI 参考'; button.setAttribute('aria-pressed',String(excluded));
         button.onclick = () => { const updated = aiPreference(id), ids = new Set(updated.excludedIds); ids.has(m.id) ? ids.delete(m.id) : ids.add(m.id); saveAIPreference(id,{...updated,excludedIds:[...ids]}); renderMessages(); };
@@ -765,7 +944,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         if (aiJobs.has(id) || aiPreparing.has(id) || !isAI(chat(id)) || chat(id).context === 'none') return;
         const oldTrigger = (messages.get(id) || []).find(m => m.clientId === aiState.retry.clientId), generation = epoch;
         if (!oldTrigger) { toast('原提问暂未加载，请重新打开会话后发送新问题。'); return; }
-        const parsed = parseAIInvocation(aiState.retry.text,{direct:chat(id).kind === 'ai'});
+        const parsed = parseAIInvocation(aiState.retry.text,{direct:isAssistantDialog(chat(id))});
         const historyCount = chat(id).context === 'mention' ? 0 : aiState.retry.historyCount ?? parsed.historyCount;
         aiPreparing.add(id); renderCompose();
         try {
@@ -776,13 +955,31 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         } finally { aiPreparing.delete(id); if (current === id) renderCompose(); }
       });
     }
-    if ($('load-earlier')) $('load-earlier').onclick = () => run(async () => { $('load-earlier').disabled = true; await fetchMessages(id,false,list[0]?.seq); });
+    if ($('load-earlier')) $('load-earlier').onclick = () => run(async () => {
+      const button = $('load-earlier'); button.disabled = true;
+      try {
+        for (const room of olderRooms) {
+          if (current !== id || !cryptoBox?.ready) break;
+          const first = messages.get(room.id)?.[0];
+          if (first) await fetchMessages(room.id,false,first.seq);
+        }
+      } finally { if (button.isConnected) button.disabled = false; }
+    });
     bindDownloads(box);
+    box.querySelectorAll('[data-review-history]').forEach(button => {
+      button.onclick = () => run(async () => {
+        const room = chat(button.dataset.reviewHistory), vault = cryptoBox;
+        if (!room || !threadVisible(room.id) || !vault?.ready) return;
+        await vault.prepareChat(room,reviewTrust);
+        if (cryptoBox !== vault || !vault.ready || !threadVisible(room.id)) return;
+        chatSecurityErrors.delete(room.id); await refreshLoadedArchive(room,vault);
+      });
+    });
     for(const item of queued.filter(item=>item.fileName&&item.status==='sending'&&outgoingJobs.has(item.clientId))) {
       const row=[...box.querySelectorAll('[data-client-id]')].find(row=>row.dataset.clientId===item.clientId),actions=row?.querySelector('.msgactions');
       if(actions&&!actions.querySelector('[data-stop-upload]')) {const button=document.createElement('button');button.type='button';button.dataset.stopUpload=item.clientId;button.textContent='停止上传';button.onclick=()=>{outgoingJobs.get(item.clientId)?.abort();item.status='failed';item.error='上传已停止，可重试发送。';delete item.progress;storeState();renderMessages();};actions.append(button);}
     }
-    box.querySelectorAll('[data-reply]').forEach(b => { b.onclick = () => { const m = list.find(m => m.id === b.dataset.reply); if (!m) return; quotes[id] = {id:m.id,senderName:person(m.senderId,c).displayName,text:m.text || m.file?.name || ''}; renderCompose(); $('input').focus(); }; });
+    box.querySelectorAll('[data-reply]').forEach(b => { b.onclick = () => { const m = byMessageId.get(b.dataset.reply); if (!m) return; quotes[id] = {id:m.id,senderName:person(m.senderId,chat(m.chatId)).displayName,text:m.text || m.file?.name || ''}; renderCompose(); $('input').focus(); }; });
     box.querySelectorAll('[data-save]').forEach(b => { b.onclick = () => run(async () => { b.disabled = true; const mid = b.dataset.save, remove = saved.has(mid); await api(`/api/messages/${encodeURIComponent(mid)}/saved`,{method:remove ? 'DELETE' : 'PUT'}); remove ? saved.delete(mid) : saved.add(mid); if (current === id) renderMessages(); }); });
     box.querySelectorAll('[data-retry]').forEach(b => { b.onclick = () => { const p = pending.find(p => p.clientId === b.dataset.retry); if (p?.fileName && !p.fileId && !rawPending.has(p.clientId)) { retryAttachmentId = p.clientId; $('fileinput').value = ''; $('fileinput').click(); toast('请重新选择未上传成功的原附件。'); } else if (p) run(() => deliver(p)); }; });
     box.querySelectorAll('[data-discard]').forEach(b => { b.onclick = () => { rawPending.delete(b.dataset.discard); pending = pending.filter(p => p.clientId !== b.dataset.discard); storeState(); renderMessages(); }; });
@@ -794,12 +991,19 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   const readCursors = new Map();
   function markRead() {
-    const id = current, list = messages.get(id), last = list?.at(-1); if (!user || !last || document.visibilityState !== 'visible') return;
+    if (!user || !current || document.visibilityState !== 'visible') return;
     if (window.innerWidth <= 720 && !$('app').classList.contains('mobile-chat')) return;
     if ($('messages').scrollHeight - $('messages').clientHeight - $('messages').scrollTop > 100) return;
-    const key = `${user.id}:${id}`; if ((readCursors.get(key) || 0) >= last.seq) return;
-    readCursors.set(key,last.seq);
-    api(`/api/chats/${encodeURIComponent(id)}/read`,{method:'POST',body:{lastSeq:last.seq}}).then(() => { const c = chat(id); if (c) { c.unread = 0; renderList(); } }).catch(() => { readCursors.delete(key); });
+    for (const {id} of threadOf()?.rooms || []) {
+      const last = messages.get(id)?.at(-1), key = `${user.id}:${id}`;
+      if (!last || (readCursors.get(key) || 0) >= last.seq) continue;
+      const account = user.id;
+      readCursors.set(key,last.seq);
+      api(`/api/chats/${encodeURIComponent(id)}/read`,{method:'POST',body:{lastSeq:last.seq}}).then(() => {
+        const room = chat(id);
+        if (user?.id === account && room && (room.lastMessage?.seq || 0) <= last.seq) { room.unread = 0; renderList(); }
+      }).catch(() => { if (readCursors.get(key) === last.seq) readCursors.delete(key); });
+    }
   }
   function resizeComposer() {
     const input = $('input'), mobile = window.innerWidth <= 720, attach = $('attach');
@@ -817,11 +1021,11 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     let drawButton=$('ai-draw');if(!drawButton){drawButton=document.createElement('button');drawButton.id='ai-draw';drawButton.type='button';drawButton.className='mention ai-draw';drawButton.innerHTML=`${icon('mountain')}画一张`;searchButton.after(drawButton);drawButton.onpointerdown=event=>{if(event.isPrimary&&event.button===0&&document.activeElement===$('input'))event.preventDefault();};drawButton.onclick=insertDrawingCommand;}
     drawButton.hidden=searchButton.hidden;drawButton.disabled=searchButton.disabled;drawButton.title='描述想画的内容，发送后由生图模型绘制';
     if (!cryptoBox?.ready) { $('send').disabled = true; return; }
-    if (chat()?.archived || chatSecurityErrors.has(current) || friendshipBlocked(chat())) { $('send').disabled = true; return; }
+    if ($('input').disabled || chat()?.archived || chatSecurityErrors.has(current) || friendshipBlocked(chat())) { $('send').disabled = true; return; }
     if (!current) return; const quote = quotes[current], file = attachments.get(current), generating = aiJobs.has(current), preparing = aiPreparing.has(current);
     $('quote').hidden = !quote; $('quotetext').textContent = quote ? `回复 ${quote.senderName}：${quote.text}` : '';
     $('attachment').hidden = !file; $('attachmentname').textContent = file ? `${file.name} · ${bytes(file.size)}` : '';
-    $('stop').hidden = !generating; $('send').hidden = false; $('send').disabled = preparing || generating || (!$('input').value.trim() && !file); resizeComposer();
+    $('stop').hidden = !generating; $('send').hidden = false; $('send').disabled = $('input').disabled || preparing || generating || (!$('input').value.trim() && !file); resizeComposer();
   }
   async function deliver(item,{signal} = {}) {
     if (!user || !cryptoBox?.ready || securityTransition || signal?.aborted || item.status === 'sending' || chat(item.chatId)?.archived) return false; const generation = epoch, vault = vaultVersion, box = cryptoBox;
@@ -931,7 +1135,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   function aiContext(id,text,pref = aiPreference(id),extra = {}) {
     const c = chat(id), rows = c?.context === 'mention' ? [] : (messages.get(id) || []);
-    return buildAIContext(rows,text,pref,{chatId:id,...(['group','direct'].includes(c?.kind) ? {speakerName:m => person(m.senderId,c).displayName,currentSpeakerName:user.displayName} : {}),...extra});
+    return buildAIContext(rows,text,pref,{chatId:id,...(['group','direct'].includes(displayKind(c)) ? {speakerName:m => person(m.senderId,c).displayName,currentSpeakerName:user.displayName} : {}),...extra});
   }
   async function showAIContext(id) {
     if (!cryptoBox?.ready || !isAI(chat(id))) return;
@@ -953,6 +1157,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('ai-restore-history').onclick = () => run(() => save({...choices(),cutoffSeq:0,excludedIds:[]}));
   }
   async function relayAI(id,shared,triggerItem,selection = null,mediaFile = null) {
+    if (!isAI(chat(id)) || chat(id).context === 'none') return;
     if (!cryptoBox?.ready || securityTransition || aiJobs.has(id)) { toast('请等待本次 AI 请求结束后再分享。'); return; }
     const generation = epoch, vault = vaultVersion, box = cryptoBox, controller = new AbortController(), pref = aiPreference(id);
     const retry = triggerItem ? {text:triggerItem.text,clientId:triggerItem.clientId,...selection} : aiStates.get(id)?.retry;
@@ -970,6 +1175,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       const operation=selection?.operation||retry?.operation||'chat',prompt=selection?.prompt||retry?.prompt||'';
       const useSearch=operation==='chat'&&(selection?.search ?? retry?.search ?? pref.search) === true;
       let memory=null;
+      // Only the signed dedicated AI room has an immutable one-person audience.
       if(operation==='chat'&&chat(id)?.kind==='ai') {
         memorySnapshot=await memoryLibrary().load({signal:controller.signal});if(!valid())return;
         memory=relevantMemory(memorySnapshot,prompt,{chatKind:'ai'});
@@ -1058,7 +1264,8 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     // Keep the IME attached to the textarea across a send. A button otherwise
     // takes focus and, once disabled by the empty composer, drops focus to body.
     $('input').focus({preventScroll:true});
-    const invocation = parseAIInvocation(text || (file&&chat().kind==='ai'&&rasterCandidate({name:file.name,mime:file.type})?'请描述这张图片。':''),{direct:chat().kind === 'ai'});
+    const invocation = parseAIInvocation(text || (file&&isAssistantDialog(chat())&&rasterCandidate({name:file.name,mime:file.type})?'请描述这张图片。':''),{direct:isAssistantDialog(chat())});
+    if (invocation.requested && hasAIEntry(chat()) && aiAccessLabel(chat())) { toast(aiAccessLabel(chat())); return; }
     if (isAI(chat()) && chat().context !== 'none' && invocation.requested) { run(() => requestAI(current,text,file,quotes[current],invocation)); return; }
     const item = makeOutgoing(current,text,file,quotes[current]); consumeComposer(current); renderMessages('send'); run(() => deliver(item));
   };
@@ -1081,9 +1288,13 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('compose-photo').onclick = () => { $('dialog').close(); if (current === id && cryptoBox?.ready) chooseAttachment(true); };
     $('compose-file').onclick = () => { $('dialog').close(); if (current === id && cryptoBox?.ready) chooseAttachment(); };
     if($('compose-draw'))$('compose-draw').onclick=()=>{$('dialog').close();if(current===id)insertDrawingCommand();};
-    if ($('compose-mention')) $('compose-mention').onclick = () => { $('dialog').close(); if (current === id) insertText(c.kind !== 'ai' ? '@山岚 ' : ''); };
+    if (hasAIEntry(c) && !canAsk) {
+      $('dialogcontent').querySelector('.compose-menu').insertAdjacentHTML('beforeend', `<button class="secondarybtn" id="compose-ai-settings">${icon('ai')}山岚设置</button>`);
+      $('compose-ai-settings').onclick = () => { $('dialog').close(); if (current === id) showAIDetails(); };
+    }
+    if ($('compose-mention')) $('compose-mention').onclick = () => { $('dialog').close(); if (current === id) insertText(!isAssistantDialog(c) ? '@山岚 ' : ''); };
     if ($('compose-search')) $('compose-search').onclick = () => { if (current !== id || !cryptoBox?.ready || aiJobs.has(id) || aiPreparing.has(id)) return; saveAIPreference(id,{...aiPreference(id),search:!aiPreference(id).search}); $('dialog').close(); renderCompose(); run(persistEncrypted); $('input').focus({preventScroll:true}); };
-    $('dialogcontent').querySelectorAll('[data-compose-prompt]').forEach(button => { button.onclick = () => { const text = `${c.kind !== 'ai' ? '@山岚 ' : ''}/10 ${button.dataset.composePrompt}`; $('dialog').close(); if (current === id && cryptoBox?.ready) { $('input').value = text; $('input').dispatchEvent(new Event('input')); $('input').focus(); } }; });
+    $('dialogcontent').querySelectorAll('[data-compose-prompt]').forEach(button => { button.onclick = () => { const text = `${!isAssistantDialog(c) ? '@山岚 ' : ''}/10 ${button.dataset.composePrompt}`; $('dialog').close(); if (current === id && cryptoBox?.ready) { $('input').value = text; $('input').dispatchEvent(new Event('input')); $('input').focus(); } }; });
   };
   $('photoinput').onchange = $('fileinput').onchange = event => {
     const file = event.target.files[0]; if (!file || !user || !current || !cryptoBox?.ready || friendshipBlocked(chat())) return;
@@ -1098,23 +1309,43 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   $('removefile').onclick = () => { attachments.delete(current); renderCompose(); };
   $('cancelquote').onclick = () => { delete quotes[current]; renderCompose(); };
   function insertText(text) { if (!current || !cryptoBox?.ready || $('input').disabled || chatSecurityErrors.has(current)) return; $('input').setRangeText(text,$('input').selectionStart,$('input').selectionEnd,'end'); $('input').dispatchEvent(new Event('input')); $('input').focus({preventScroll:true}); }
-  function insertDrawingCommand() { if (!current || !cryptoBox?.ready || $('input').disabled || chatSecurityErrors.has(current)) return; $('input').value=drawingDraft($('input').value,{direct:chat()?.kind==='ai'});$('input').dispatchEvent(new Event('input'));$('input').focus({preventScroll:true}); }
+  function insertDrawingCommand() { if (!current || !cryptoBox?.ready || $('input').disabled || chatSecurityErrors.has(current)) return; $('input').value=drawingDraft($('input').value,{direct:isAssistantDialog(chat())});$('input').dispatchEvent(new Event('input'));$('input').focus({preventScroll:true}); }
   function insertAIMention() {
     const c = chat(), input = $('input');
-    if (!['group','direct'].includes(c?.kind) || !isAI(c) || c.context === 'none' || $('mention').disabled) return;
+    if (!hasAIEntry(c) || !['group','direct'].includes(displayKind(c)) || $('mention').disabled) return;
+    if (aiAccessLabel(c)) { showAIDetails(); return; }
     const prefix = input.value.slice(0,input.selectionStart), separator = prefix && !/\s$/.test(prefix) ? ' ' : '';
     insertText(`${separator}@山岚 `);
   }
   $('emoji').onclick = () => run(() => openEmoticons()); $('mention').onclick = insertAIMention;
-  document.querySelectorAll('[data-prompt]').forEach(b => { b.onclick = () => insertText(`${$('input').value ? '\n' : ''}${chat()?.kind !== 'ai' ? '@山岚 ' : ''}/10 ${b.dataset.prompt}`); });
+  document.querySelectorAll('[data-prompt]').forEach(b => { b.onclick = () => insertText(`${$('input').value ? '\n' : ''}${!isAssistantDialog(chat()) ? '@山岚 ' : ''}/10 ${b.dataset.prompt}`); });
   $('stop').onclick = () => { aiJobs.get(current)?.abort(); };
   function hideDetails() { $('app').classList.add('no-details'); $('app').classList.remove('show-details'); $('info').setAttribute('aria-expanded','false'); }
   function showDetails() { if (!chat()) return; renderDetails(); $('app').classList.remove('no-details'); $('app').classList.add('show-details'); $('info').setAttribute('aria-expanded','true'); }
+  function showAIDetails() {
+    showDetails();
+    const section = $('detail-ai');
+    section?.scrollIntoView({block:'nearest'});
+    section?.focus({preventScroll:true});
+  }
+  function aiDetailMarkup(c) {
+    if (!hasAIEntry(c)) return '';
+    const status = aiAccessLabel(c), group = displayKind(c) === 'group';
+    const canConfigure = c.aiAccess && c.canMessage !== false;
+    const ownerSettings = canEdit(c) || user.role === 'admin';
+    const scope = group ? '本群授权' : '私聊账号授权';
+    return `<section id="detail-ai" class="detailsection" tabindex="-1" aria-labelledby="detail-ai-title"><div class="policybox"><strong id="detail-ai-title">${icon('ai')}山岚</strong>
+      <p id="detail-ai-status" role="status">${esc(status || (displayKind(c) === 'ai' ? '可以直接向山岚发消息。' : '在输入框点 @山岚 即可提问，普通消息只发给聊天成员。'))}</p>
+      ${canConfigure ? `<label class="toggleline">暂停我在此会话的山岚调用<input type="checkbox" id="detail-ai-paused" ${c.aiPausedForMe ? 'checked' : ''}></label>` : ''}
+      ${c.aiAccess === 'ready' || (!c.aiAccess && isAI(c)) ? `<label>会话分享范围<select id="context" ${ownerSettings ? '' : 'disabled'}><option value="recent" ${c.context === 'recent' ? 'selected' : ''}>允许指定前文</option><option value="mention" ${c.context === 'mention' ? 'selected' : ''}>只分享当前输入</option><option value="none" ${c.context === 'none' ? 'selected' : ''}>暂停本会话的山岚</option></select></label>` : ''}
+      ${!status ? '<button id="ai-detail-ask">向山岚提问</button><button id="ai-context-settings">管理前文与隐私</button>' : ''}
+      ${user.role === 'admin' ? `<button id="aiconfig">模型与${scope}</button>` : ''}</div></section>`;
+  }
   function renderDetails() {
     const c = chat(); if (!c) return; const editable = canEdit(c);
-    $('details').innerHTML = `<div class="detailshead"><h3>会话详情</h3><button class="iconbtn" id="closedetails" aria-label="关闭详情">×</button></div><div class="detailsprofile"><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><h3>${esc(c.name)}</h3>${editable && c.kind === 'group' ? '<button id="rename-chat" class="secondarybtn">修改名称</button>' : ''}</div><section class="detailsection"><button class="detailaction" id="security-details">查看安全码与加密成员</button><h4>参与者${editable && c.kind === 'group' ? '<button id="add-members">添加成员</button>' : ''}</h4>${c.members.map(p => `<div class="memberrow"><div class="avatar ${p.id === 'ai' ? 'ai' : ''}">${avatar(p)}</div><span>${esc(p.displayName)}</span><small>${p.id === 'ai' ? 'AI' : p.id === user.id ? '我' : ''}</small></div>`).join('')}</section>${isAI(c) ? `<section class="detailsection"><div class="policybox"><strong>${icon('ai')}山岚的参与方式</strong><p>${c.kind !== 'ai' ? '被 @山岚 时直接请求 AI，默认只读取当前问题。' : '普通消息连续回复；@山岚 只读取当前问题。'}本次提问附带的图片会交给看图模型；其他附件和历史图片不会自动分享。双人和群聊不使用私人长期记忆。</p><label>AI 分享<select id="context" ${editable ? '' : 'disabled'}><option value="recent" ${c.context === 'recent' ? 'selected' : ''}>允许指定前文</option><option value="mention" ${c.context === 'mention' ? 'selected' : ''}>只分享当前输入</option><option value="none" ${c.context === 'none' ? 'selected' : ''}>暂停 AI</option></select></label>${user.role === 'admin' ? '<button id="aiconfig">模型设置</button>' : ''}</div></section>` : ''}<section class="detailsection"><label class="toggleline">置顶会话<input type="checkbox" id="pin" ${c.pinned ? 'checked' : ''}></label><button class="detailaction" id="mutebtn">${icon('bell')}${c.muted ? '关闭免打扰' : '开启免打扰'}</button><button class="detailaction" id="searchdetail">${icon('search')}搜索这段对话</button></section><section class="detailsection"><h4>已加载的附件</h4>${(messages.get(c.id) || []).filter(m => m.file).map(m => `<div class="detailfile">${fileMarkup(m.file,m)}</div>`).join('') || '<p class="dialogcopy">附件会出现在这里。</p>'}</section>`;
+    $('details').innerHTML = `<div class="detailshead"><h3>会话详情</h3><button class="iconbtn" id="closedetails" aria-label="关闭详情">×</button></div><div class="detailsprofile"><div class="avatar ${chatStyle(c)}">${chatAvatar(c)}</div><h3>${esc(c.name)}</h3>${editable && displayKind(c) === 'group' ? '<button id="rename-chat" class="secondarybtn">修改名称</button>' : ''}</div>${aiDetailMarkup(c)}<section class="detailsection"><button class="detailaction" id="security-details">查看安全码与加密成员</button><h4>参与者${editable && displayKind(c) === 'group' ? '<button id="add-members">添加成员</button>' : ''}</h4>${c.members.filter(p => displayKind(c) === 'ai' || p.id !== 'ai').map(p => `<div class="memberrow"><div class="avatar ${p.id === 'ai' ? 'ai' : ''}">${avatar(p)}</div><span>${esc(p.displayName)}</span><small>${p.id === 'ai' ? 'AI' : p.id === user.id ? '我' : ''}</small></div>`).join('')}</section><section class="detailsection"><label class="toggleline">置顶会话<input type="checkbox" id="pin" ${c.pinned ? 'checked' : ''}></label><button class="detailaction" id="mutebtn">${icon('bell')}${c.muted ? '关闭免打扰' : '开启免打扰'}</button><button class="detailaction" id="searchdetail">${icon('search')}搜索这段对话</button></section><section class="detailsection"><h4>已加载的附件</h4>${threadMessages(c.id).filter(m => m.file).map(m => `<div class="detailfile">${fileMarkup(m.file,m)}</div>`).join('') || '<p class="dialogcopy">附件会出现在这里。</p>'}</section>`;
     $('closedetails').onclick = hideDetails; $('searchdetail').onclick = () => openSearch(true);
-    if (c.kind === 'group') {
+    if (displayKind(c) === 'group') {
       const section = $('security-details').closest('.detailsection');
       const heading = section.querySelector('h4');
       heading.textContent = `群成员（${c.members.filter(p => p.id !== 'ai').length}）`;
@@ -1126,17 +1357,27 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       note.textContent = editable ? '可添加已通过申请的好友。新成员只能解密加入之后的消息。' : `群主：${person(c.ownerId,c).displayName}。新成员加入需由群主确认加密身份。`;
       action.after(note);
       section.querySelectorAll('.memberrow').forEach((row,index) => {
-        const member = c.members[index];
+        const member = c.members.filter(p => p.id !== 'ai')[index];
         row.querySelector('small').textContent = member.id === 'ai' ? 'AI' : member.id === String(c.ownerId) ? (member.id === user.id ? '群主 · 我' : '群主') : member.id === user.id ? '我' : '';
       });
     }
-    if (isAI(c)) {
-      const policy = $('details').querySelector('.policybox');
-      policy.querySelector('p').textContent = `${c.kind === 'group' ? '普通消息不会召唤 AI；@山岚 只读当前问题，/10 带前十条。' : '普通消息连续回复；@山岚 只读当前问题，/10 带前十条。'}选定文字从此设备直达配置的模型服务；聊天服务器只保存加密配置。回复在本机加密后存入聊天，附件不提供给模型。`;
-      $('context').querySelector('[value="recent"]').textContent = '允许指定前文';
-      const button = document.createElement('button'); button.id = 'ai-context-settings'; button.textContent = '管理前文与隐私'; button.onclick = () => run(() => showAIContext(c.id)); policy.append(button);
-    }
-    if (c.kind === 'direct' && directPeer(c)) {
+    if ($('detail-ai-paused')) $('detail-ai-paused').onchange = event => {
+      const toggle = event.currentTarget;
+      toggle.disabled = true;
+      run(async () => {
+        try {
+          await patchChat(c.id,{aiPausedForMe:toggle.checked});
+          if (toggle.checked) aiJobs.get(c.id)?.abort();
+        } finally { if (current === c.id) { renderDetails(); renderCompose(); } }
+      });
+    };
+    if ($('ai-detail-ask')) $('ai-detail-ask').onclick = () => {
+      if (current !== c.id || aiAccessLabel(c)) return;
+      hideDetails();
+      if (isAssistantDialog(c)) $('input').focus({preventScroll:true}); else insertAIMention();
+    };
+    if ($('ai-context-settings')) $('ai-context-settings').onclick = () => run(() => showAIContext(c.id));
+    if (displayKind(c) === 'direct' && directPeer(c)) {
       const peer = directPeer(c), section = document.createElement('section'); section.className = 'detailsection';
       section.innerHTML = c.canMessage === true ? '<button class="detailaction friend-remove" id="remove-chat-friend">解除好友</button>' : '<p class="dialogcopy">这段历史仍可阅读。成为好友后才能继续聊天。</p><button class="secondarybtn" id="add-chat-friend">查看好友申请</button>';
       $('details').append(section);
@@ -1146,7 +1387,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('pin').onchange = event => run(() => patchChat(c.id,{pinned:event.target.checked}));
     $('mutebtn').onclick = () => run(() => patchChat(c.id,{muted:!c.muted}));
     if ($('context')) $('context').onchange = event => run(() => patchChat(c.id,{context:event.target.value}));
-    if ($('aiconfig')) $('aiconfig').onclick = () => run(aiSettings);
+    if ($('aiconfig')) $('aiconfig').onclick = () => run(() => aiSettings(c));
     if ($('add-members')) $('add-members').onclick = () => run(() => choosePeople('add',c));
     if ($('security-details')) $('security-details').onclick = () => run(() => encryptionDetails(c));
     bindDownloads($('details'));
@@ -1168,18 +1409,18 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   document.querySelectorAll('[data-filter]').forEach(b => { b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll('[data-filter]').forEach(p => { p.classList.toggle('selected',p === b); p.setAttribute('aria-pressed',String(p === b)); }); renderList(); }; });
   async function choosePeople(kind,c = null) {
     if (!cryptoBox?.ready) { await unlockAndRefresh(); if (!cryptoBox?.ready) return; }
-    if (kind === 'add' && (c?.kind !== 'group' || !canEdit(c))) { toast('请让群主打开会话详情，选择“添加群成员”。'); return; }
+    if (kind === 'add' && (displayKind(c) !== 'group' || !canEdit(c))) { toast('请让群主打开会话详情，选择“添加群成员”。'); return; }
     const box = cryptoBox, generation = epoch, vault = vaultVersion;
     const version = openDialog(kind === 'group' ? '创建小群' : kind === 'add' ? '添加群成员' : '和朋友聊天','<p class="dialogbusy">正在加载联系人…</p>');
     const valid = () => dialogCurrent(version) && box === cryptoBox && box.ready && generation === epoch && vault === vaultVersion;
     const [result,latest] = await Promise.all([api('/api/friends'),kind === 'add' ? api('/api/chats') : null]); if (!valid()) return;
     if (kind === 'add') {
       c = latest.chats.map(normalizeChat).find(value => value.id === c.id);
-      if (!c || c.kind !== 'group' || !canEdit(c)) { $('dialogcontent').innerHTML = '<p class="form-error" role="alert">你已无法管理此群。请刷新会话列表，或联系群主。</p>'; return; }
+      if (!c || displayKind(c) !== 'group' || !canEdit(c)) { $('dialogcontent').innerHTML = '<p class="form-error" role="alert">你已无法管理此群。请刷新会话列表，或联系群主。</p>'; return; }
       upsertChat(c); $('dialogtitle').textContent = `给“${c.name}”添加成员`;
     }
     const users = result.friends.filter(p => String(p.id) !== user.id && String(p.id) !== 'ai' && (!c || !c.members.some(m => m.id === String(p.id))));
-    $('dialogcontent').innerHTML = `${kind === 'group' ? '<label class="dialogfield">群名称<input id="new-name" class="dialoginput" maxlength="80" placeholder="给这次相聚起个名字"></label>' : ''}<label class="dialogfield">查找好友<input id="people-filter" class="dialoginput" placeholder="昵称或账户名"></label><div id="people-list" class="choice-users">${users.map(p => `<label class="choice-user" data-person-name="${esc(`${p.displayName} ${p.username}`.toLocaleLowerCase())}"><input type="${kind === 'direct' ? 'radio' : 'checkbox'}" name="member" value="${esc(p.id)}"><div class="avatar">${avatar(p)}</div><span>${esc(p.displayName)}<small>@${esc(p.username)}</small></span></label>`).join('') || '<p class="dialogcopy">暂无可选择的好友。请先添加朋友，等待申请通过。</p>'}</div><button class="secondarybtn" id="people-add-friend">添加朋友</button>${kind === 'group' ? '<label class="inline-check"><input id="include-ai" type="checkbox">邀请山岚 AI 加入</label>' : ''}<p id="people-error" class="form-error" role="alert"></p><div class="dialogactions"><button id="create-confirm" class="sendbtn" ${!users.length ? 'disabled' : ''}>${kind === 'add' ? '添加' : '开始聊天'}</button></div>`;
+    $('dialogcontent').innerHTML = `${kind === 'group' ? '<label class="dialogfield">群名称<input id="new-name" class="dialoginput" maxlength="80" placeholder="三人及以上的群名称"></label>' : ''}<label class="dialogfield">查找好友<input id="people-filter" class="dialoginput" placeholder="昵称或账户名"></label><div id="people-list" class="choice-users">${users.map(p => `<label class="choice-user" data-person-name="${esc(`${p.displayName} ${p.username}`.toLocaleLowerCase())}"><input type="${kind === 'direct' ? 'radio' : 'checkbox'}" name="member" value="${esc(p.id)}"><div class="avatar">${avatar(p)}</div><span>${esc(p.displayName)}<small>@${esc(p.username)}</small></span></label>`).join('') || '<p class="dialogcopy">暂无可选择的好友。请先添加朋友，等待申请通过。</p>'}</div><button class="secondarybtn" id="people-add-friend">添加朋友</button><p id="people-error" class="form-error" role="alert"></p><div class="dialogactions"><button id="create-confirm" class="sendbtn" ${!users.length ? 'disabled' : ''}>${kind === 'add' ? '添加' : '开始聊天'}</button></div>`;
     $('people-add-friend').onclick = () => { $('dialog').close(); run(() => openContacts('add')); };
     $('people-filter').oninput = event => { const q = event.target.value.trim().toLocaleLowerCase(); $('people-list').querySelectorAll('[data-person-name]').forEach(el => { el.hidden = !el.dataset.personName.includes(q); }); };
     if (kind === 'add') {
@@ -1191,8 +1432,9 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (!valid()) return;
       const memberIds = [...$('people-list').querySelectorAll('input:checked')].map(i => i.value), button = $('create-confirm'), errorBox = $('people-error');
       if (!memberIds.length) { errorBox.textContent = '请选择至少一位朋友。'; return; }
-      const name = kind === 'group' ? $('new-name').value.trim() : undefined;
-      if (kind === 'group' && !name) { errorBox.textContent = '请填写群名称。'; return; }
+      const roomKind = kind === 'group' && memberIds.length === 1 ? 'direct' : kind;
+      const name = roomKind === 'group' ? $('new-name').value.trim() : undefined;
+      if (roomKind === 'group' && !name) { errorBox.textContent = '请填写群名称。'; return; }
       button.disabled = true;
       try {
         let result;
@@ -1203,7 +1445,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
           result = await box.updateMembers(c,ids,reviewTrust);
           if (!valid()) return; assertAudience(result.chat,ids);
         }
-        else { result = await api('/api/chats',{method:'POST',body:{kind,name,memberIds,includeAI:kind === 'group' && $('include-ai').checked}}); assertAudience(result.chat,[user.id,...memberIds]); }
+        else { result = await api('/api/chats',{method:'POST',body:{kind:roomKind,name,memberIds}}); assertAudience(result.chat,[user.id,...memberIds]); }
         if (!valid()) return; upsertChat(result.chat); $('dialog').close(); await switchChat(String(result.chat.id)); queueRefresh();
         if (kind === 'add') { showDetails(); toast(`已添加 ${memberIds.length} 位群成员，新成员只能解密加入后的消息。`); }
       }
@@ -1213,7 +1455,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   function newChat() {
     if (!cryptoBox?.ready) { run(unlockAndRefresh); return; }
-    openDialog('开始一段会话',`<button class="dialogchoice" data-create="direct"><div class="avatar">${icon('people')}</div><span><strong>和朋友聊天</strong><small>选择已通过好友申请的朋友</small></span></button><button class="dialogchoice" data-create="group"><div class="avatar group">${icon('mountain')}</div><span><strong>创建小群</strong><small>邀请朋友，也可以让 AI 参与</small></span></button><button class="dialogchoice" data-create="ai"><div class="avatar ai">${icon('ai')}</div><span><strong>和山岚聊聊</strong><small>开启一段独立的 AI 会话</small></span></button><button class="dialogchoice" data-create="notes"><div class="avatar">记</div><span><strong>我的随手记</strong><small>只属于自己的文字和文件</small></span></button>`);
+    openDialog('开始一段会话',`<button class="dialogchoice" data-create="direct"><div class="avatar">${icon('people')}</div><span><strong>和朋友聊天</strong><small>选择已通过好友申请的朋友</small></span></button><button class="dialogchoice" data-create="group"><div class="avatar group">${icon('mountain')}</div><span><strong>创建小群</strong><small>选择至少两位好友组成群聊</small></span></button><button class="dialogchoice" data-create="ai"><div class="avatar ai">${icon('ai')}</div><span><strong>和山岚聊聊</strong><small>开启一段独立的 AI 会话</small></span></button><button class="dialogchoice" data-create="notes"><div class="avatar">记</div><span><strong>我的随手记</strong><small>只属于自己的文字和文件</small></span></button>`);
     $('dialogcontent').querySelectorAll('[data-create]').forEach(b => { b.onclick = () => run(async () => { const kind = b.dataset.create; if (kind === 'direct' || kind === 'group') return choosePeople(kind); b.disabled = true; try { const result = await api('/api/chats',{method:'POST',body:{kind,name:kind === 'ai' ? '和山岚聊聊' : '随手记',memberIds:[]}}); assertAudience(result.chat,[user.id]); upsertChat(result.chat); $('dialog').close(); await switchChat(String(result.chat.id)); queueRefresh(); } finally { if (b.isConnected) b.disabled = false; } }); });
   }
   function assertAudience(c,expected) { const actual = (c.members || []).filter(m => m.id !== 'ai').map(m => m.id).sort(); if (JSON.stringify(actual) !== JSON.stringify([...new Set(expected)].sort())) throw new Error('服务器返回的参与者与你选择的不一致，已停止建立加密会话。'); }
@@ -1222,11 +1464,11 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   function bindResults() { $('dialogcontent').querySelectorAll('[data-locate]').forEach(b => { b.onclick = () => run(() => locateMessage(b.dataset.chat,b.dataset.locate,Number(b.dataset.seq))); }); }
   async function locateMessage(id,mid,seq) {
     id = String(id); $('dialog').close(); await switchChat(id); const generation = selection;
-    while (!(messages.get(id) || []).some(m => m.id === mid) && hasMore.get(id) && current === id && selection === generation) {
+    while (!(messages.get(id) || []).some(m => m.id === mid) && hasMore.get(id) && threadVisible(id) && selection === generation) {
       const first = messages.get(id)?.[0]; if (!first || first.seq <= seq) break;
       await fetchMessages(id,false,first.seq);
     }
-    if (current !== id || selection !== generation) return;
+    if (!threadVisible(id) || selection !== generation) return;
     const element = [...$('messages').querySelectorAll('[data-message]')].find(el => el.dataset.message === mid);
     if (element) { element.scrollIntoView({block:'center'}); element.classList.add('highlight'); setTimeout(() => element.classList.remove('highlight'),2200); }
   }
@@ -1235,7 +1477,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     const scope = inChat ? current : null, version = openDialog(inChat ? '在此设备搜索这段对话' : '在此设备搜索消息','<label class="dialogfield">关键词<input id="messagesearch" class="dialoginput" maxlength="200" placeholder="关键词只在此设备处理"></label><p class="dialogcopy">搜索已加载并成功解密的消息。可逐批加载更早消息，关键词不会发给服务器。</p><button id="search-older" class="secondarybtn">加载更多历史</button><p id="search-progress" class="dialogcopy"></p><div id="searchresults" class="searchresults"><p class="dialogcopy">输入关键词开始搜索。</p></div>');
     const searchLocal = () => {
       if (!dialogCurrent(version) || !cryptoBox?.ready) return;
-      const q = $('messagesearch').value.trim().toLocaleLowerCase(), candidates = [...messages.entries()].filter(([id]) => !scope || id === scope).flatMap(([id,list]) => list.filter(m => m._decrypted && !m.decryptError).map(message => ({message,chatName:chat(id)?.name || '会话',senderName:person(message.senderId,chat(id)).displayName})));
+      const q = $('messagesearch').value.trim().toLocaleLowerCase(), candidates = [...messages.entries()].filter(([id]) => !scope || threadOf(id) === threadOf(scope)).flatMap(([id,list]) => list.filter(m => m._decrypted && !m.decryptError).map(message => ({message,chatName:chat(id)?.name || '会话',senderName:person(message.senderId,chat(id)).displayName})));
       const found = q ? candidates.filter(item => `${item.message.text}\n${item.message.file?.name || ''}`.toLocaleLowerCase().includes(q)).slice(0,100) : [];
       $('search-progress').textContent = `已在此设备解密 ${candidates.length} 条消息${q ? `，显示 ${found.length} 条匹配` : ''}`;
       $('searchresults').innerHTML = !q ? '<p class="dialogcopy">输入关键词开始搜索。</p>' : found.length ? resultsMarkup(found) : '<p class="dialogcopy">已加载的内容中没有找到，可继续加载历史。</p>'; bindResults();
@@ -1244,7 +1486,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     $('search-older').onclick = () => run(async () => {
       const button = $('search-older'); button.disabled = true; let count = 0;
       try {
-        const targets = chats.filter(c => !scope || c.id === scope);
+        const targets = scope ? threadOf(scope)?.rooms || [] : chats;
         for (const c of targets) {
           if (!dialogCurrent(version) || !cryptoBox?.ready) break;
           if (messages.has(c.id) && !hasMore.get(c.id)) continue;
@@ -1257,9 +1499,9 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     });
     $('messagesearch').focus(); searchLocal();
   }
-  async function openSaved() {
+  async function openSaved(refresh = false) {
     if (!cryptoBox?.ready) { await unlockAndRefresh(); if (!cryptoBox?.ready) return; }
-    const version = openDialog('我的收藏','<p class="dialogbusy">正在此设备解密收藏…</p>'), box = cryptoBox;
+    const version = refresh ? dialogVersion : openDialog('我的收藏','<p class="dialogbusy">正在此设备解密收藏…</p>'), box = cryptoBox, read = ++savedRead;
     const result = await api('/api/saved'); if (!dialogCurrent(version)) return;
     const items = [];
     for (const item of result.items) {
@@ -1269,6 +1511,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       const message = await decodedMessage(c,item.message); items.push({...item,message:message.decryptError ? {...message,text:`无法解密：${message.decryptError}`} : message});
     }
     if (!dialogCurrent(version) || box !== cryptoBox || !box.ready) return;
+    if (read !== savedRead) return;
     saved = new Set(result.items.map(i => String(i.message.id))); $('dialogcontent').innerHTML = items.length ? resultsMarkup(items) : '<p class="dialogcopy">点消息下方的“收藏”，把值得再看的内容留下来。</p>'; bindResults(); renderMessages();
   }
   $('chatsearch').onclick = () => { if (current) openSearch(true); };
@@ -1406,7 +1649,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       if (!valid()) return; const button = $('remove-friend-confirm'), controller = new AbortController(); button.disabled = true; transfers.add(controller);
       try {
         await api(`/api/friends/${encodeURIComponent(peer.id)}`,{method:'DELETE',signal:controller.signal}); if (!valid()) return;
-        chats = chats.map(c => c.kind === 'direct' && directPeer(c)?.id === peer.id ? {...c,canMessage:false,friendshipStatus:'none',friendRequestId:null} : c);
+        chats = chats.map(c => displayKind(c) === 'direct' && directPeer(c)?.id === peer.id ? {...c,canMessage:false,friendshipStatus:'none',friendRequestId:null} : c);
         chatRevision++; contactUsers = contactUsers.filter(person => person.id !== peer.id);
         directoryUsers = directoryUsers.map(person => person.id === peer.id ? {...person,friendshipStatus:'none',friendRequestId:null} : person);
         $('dialog').close(); if (current) { renderHeader(); renderCompose(); if ($('app').classList.contains('show-details')) renderDetails(); }
@@ -1417,7 +1660,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   }
   document.querySelectorAll('[data-nav]').forEach(button => { button.onclick = () => { if (button.dataset.nav === 'chat') { setNavigation('chat'); $('app').classList.remove('mobile-chat'); } else if (button.dataset.nav === 'people') run(openContacts); else { setNavigation('saved'); run(openSaved); } }; });
   $('dialog').addEventListener('close',() => { if (activeView === 'saved') setNavigation('chat'); });
-  async function aiSettings() {
+  async function aiSettings(fromChat = null) {
     if (user?.role !== 'admin') { toast('请联系管理员配置 AI 模型。'); return; }
     if (!cryptoBox?.ready || securityTransition) { await unlockAndRefresh(); if (!cryptoBox?.ready || securityTransition) return; }
     const box = cryptoBox, generation = epoch, vault = vaultVersion, controller = new AbortController(); transfers.add(controller);
@@ -1432,8 +1675,21 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     catch (error) { if (valid()) { $('dialogcontent').innerHTML = `<p class="form-error" role="alert">${esc(error.message)}</p><button id="ai-retry-settings" class="secondarybtn">重新读取</button>`; $('ai-retry-settings').onclick = () => run(aiSettings); } return; }
     if (!valid()) return;
     const candidates = (config.candidateUsers || []).map(person => ({...person,id:String(person.id)})), existingRecipients = new Set((config.configuration?.payload?.recipients || []).map(person => String(person.userId)));
-    $('dialogcontent').innerHTML = `<form id="ai-form" class="account-form"><p class="dialogcopy">填写服务商的普通 API Key。获准用户的设备直接连接模型，聊天服务器只保存加密配置。</p><label class="inline-check"><input type="checkbox" id="ai-enabled" ${config.configuration ? config.enabled ? 'checked' : '' : 'checked'}>启用山岚</label><label>API 地址<input id="ai-base-url" type="url" required maxlength="2048" value="${esc(config.configuration?.payload?.baseUrl || (config.mode === 'shared_direct' ? config.baseUrl : '') || 'https://ai.isok.dev/v1')}" placeholder="https://ai.isok.dev/v1" autocomplete="off"></label><label>API Key<input id="ai-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="${config.configuration ? '已加密保存，留空保留原 Key' : '粘贴服务商提供的普通 API Key'}"></label><label>模型<input id="ai-model" list="ai-model-options" maxlength="200" required value="${esc(config.configuration?.payload?.model || (config.mode === 'shared_direct' ? config.model : '') || '')}" placeholder="读取模型列表，或手动填写模型名称" autocomplete="off"><datalist id="ai-model-options"></datalist></label><div class="ai-model-tools"><button type="button" class="secondarybtn" id="ai-load-models">读取模型</button><span id="ai-model-status" class="dialogcopy" role="status">模型列表由此设备直接读取；也可手动填写。</span></div><h3 class="ai-authorize-title">允许使用山岚的账户</h3><p class="dialogcopy">Key 不在普通用户界面显示，获准设备仍有能力提取。请只授权你信任的账户；费用与限额由服务商管理。</p><button type="button" id="ai-authorize-new" class="secondarybtn">勾选所有已准备好的账户</button><div class="choice-users ai-authorized-users">${candidates.map(person => `<label class="choice-user"><input type="checkbox" name="ai-recipient" value="${esc(person.id)}" ${person.identity && (!config.configuration || existingRecipients.has(person.id)) ? 'checked' : ''} ${!person.identity || person.id === user.id ? 'disabled' : ''}><div class="avatar">${avatar(person)}</div><span>${esc(person.displayName || person.username)}<small>@${esc(person.username)} · ${person.identity ? existingRecipients.has(person.id) ? '已授权' : '待授权' : '尚未建立加密身份，需先登录并解锁聊天'}</small></span></label>`).join('')}</div><p class="dialogcopy">新用户加入后，回来勾选并保存即可，不用重新输入 Key。取消授权不能收回已取得的 Key；彻底撤销时，请在服务商处更换 Key 后重新保存。服务商会处理你主动交给 AI 的原文。</p><p class="form-error" id="ai-error" role="alert"></p><button class="sendbtn" id="ai-save">加密并保存设置</button></form>`;
+    const groups = config.candidateGroups || [];
+    const personalGrants = new Set(config.audience?.userIds ?? [...existingRecipients]);
+    const groupGrants = new Set(config.audience?.groupIds || []);
+    const groupField = config.audience ? `<h3>允许使用山岚的群聊</h3><p class="dialogcopy">群内成员可在勾选的群里召唤山岚。新增成员首次登录后，请再保存一次授权。</p><div class="choice-users">${groups.map(group => `<label class="choice-user"><input type="checkbox" name="ai-group" value="${esc(group.id)}" ${groupGrants.has(group.id) ? 'checked' : ''}><span>${esc(group.name)}<small>${group.memberIds.length} 位成员</small></span></label>`).join('') || '<p class="dialogcopy">当前没有三人及以上的群聊。</p>'}</div>` : '';
+    $('dialogcontent').innerHTML = `<form id="ai-form" class="account-form"><p class="dialogcopy">填写服务商的普通 API Key。获准用户的设备直接连接模型，聊天服务器只保存加密配置。</p><label class="inline-check"><input type="checkbox" id="ai-enabled" ${config.configuration ? config.enabled ? 'checked' : '' : 'checked'}>启用山岚</label><label>API 地址<input id="ai-base-url" type="url" required maxlength="2048" value="${esc(config.configuration?.payload?.baseUrl || (config.mode === 'shared_direct' ? config.baseUrl : '') || 'https://ai.isok.dev/v1')}" placeholder="https://ai.isok.dev/v1" autocomplete="off"></label><label>API Key<input id="ai-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="${config.configuration ? '已加密保存，留空保留原 Key' : '粘贴服务商提供的普通 API Key'}"></label><label>模型<input id="ai-model" list="ai-model-options" maxlength="200" required value="${esc(config.configuration?.payload?.model || (config.mode === 'shared_direct' ? config.model : '') || '')}" placeholder="读取模型列表，或手动填写模型名称" autocomplete="off"><datalist id="ai-model-options"></datalist></label><div class="ai-model-tools"><button type="button" class="secondarybtn" id="ai-load-models">读取模型</button><span id="ai-model-status" class="dialogcopy" role="status">模型列表由此设备直接读取；也可手动填写。</span></div><h3 class="ai-authorize-title">允许在私聊中使用山岚的账户</h3><p class="dialogcopy">Key 不在普通用户界面显示，获准设备仍有能力提取。请只授权你信任的账户；费用与限额由服务商管理。</p><button type="button" id="ai-authorize-new" class="secondarybtn">勾选所有已准备好的账户</button><div class="choice-users ai-authorized-users">${candidates.map(person => `<label class="choice-user"><input type="checkbox" name="ai-recipient" value="${esc(person.id)}" ${person.identity && (person.id === user.id || personalGrants.has(person.id)) ? 'checked' : ''} ${!person.identity || person.id === user.id ? 'disabled' : ''}><div class="avatar">${avatar(person)}</div><span>${esc(person.displayName || person.username)}<small>@${esc(person.username)} · ${person.identity ? personalGrants.has(person.id) ? '已授权' : '待授权' : '尚未建立加密身份，需先登录并解锁聊天'}</small></span></label>`).join('')}</div>${groupField}<p class="dialogcopy">新用户加入后，回来勾选并保存即可，不用重新输入 Key。取消授权不能收回已取得的 Key；彻底撤销时，请在服务商处更换 Key 后重新保存。服务商会处理你主动交给 AI 的原文。</p><p class="form-error" id="ai-error" role="alert"></p><button class="sendbtn" id="ai-save">加密并保存设置</button></form>`;
     if(!config.configuration&&config.history?.length)$('ai-form').insertAdjacentHTML('afterbegin','<p class="dialogcopy">旧加密身份已归档，原 AI 密钥无法从新身份读取。请重新填写模型、搜索等 Key，再授权给需要使用山岚的账户。</p>');
+    if (fromChat) {
+      const group = displayKind(fromChat) === 'group';
+      const choices = $('ai-form').querySelectorAll(group ? '[name="ai-group"]' : '[name="ai-recipient"]');
+      const ids = group ? [fromChat.id] : fromChat.members.map(p => p.id);
+      for (const choice of choices) if (ids.includes(choice.value)) choice.closest('label').classList.add('ai-current-scope');
+      const label = group ? '勾选当前群并保存，即可让群成员在这里调用山岚。' : '分别勾选需要在私聊中调用山岚的账号，然后保存。';
+      $('ai-form').insertAdjacentHTML('afterbegin',`<p class="dialogcopy">当前会话 · ${esc(fromChat.name)}。${label} <button type="button" id="ai-show-scope">查看授权对象</button></p>`);
+      $('ai-show-scope').onclick = () => $('ai-form').querySelector('.ai-current-scope')?.scrollIntoView({block:'center'});
+    }
     keyField = $('ai-key');
     $('ai-form').querySelector('.ai-authorize-title').insertAdjacentHTML('beforebegin',`<div class="ai-capability-settings">${[['vision','看图','给山岚发送图片时使用，模型需要支持图片理解。'],['image','生图','使用 /生图 加描述，或对山岚说“帮我画一张…”。支持兼容接口的 images/generations。']].map(([name,label,copy])=>{const item=config.configuration?.payload?.[name];return `<details class="ai-model-section" ${item?.enabled?'open':''}><summary>${label}模型${item?.enabled?' · 已启用':' · 可选'}</summary><p class="dialogcopy">${copy}</p><label class="inline-check"><input id="ai-${name}-enabled" type="checkbox" ${item?.enabled?'checked':''}>启用${label}</label><label>API 地址<input id="ai-${name}-base-url" type="url" maxlength="512" value="${esc(item?.baseUrl||'')}" placeholder="留空使用文字模型的 API 地址" autocomplete="off"></label><label>API Key<input id="ai-${name}-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空保留；首次留空使用文字模型的 Key"></label><label>模型名称<input id="ai-${name}-model" list="ai-${name}-model-options" maxlength="200" value="${esc(item?.model||'')}" placeholder="填写支持${label}的模型名称" autocomplete="off"><datalist id="ai-${name}-model-options"></datalist></label><button type="button" class="secondarybtn" id="ai-${name}-load-models">读取可用模型</button><p class="dialogcopy" id="ai-${name}-status" role="status"></p></details>`;}).join('')}</div>`);
     for(const name of ['vision','image'])profileKeyFields.push($('ai-'+name+'-key'));
@@ -1485,13 +1741,17 @@ import { createFileSink as openFileSink } from './file-save.mjs';
         const key = inputKey || saved?.key; if (!key) throw new Error('请先输入服务商的 API Key。');
         const tavilyKey=inputTavilyKey || saved?.tavilyKey || '', searchEnabled=$('ai-search-enabled').checked;
         if(searchEnabled&&!tavilyKey)throw new Error('启用联网搜索前，请填写 Tavily API Key。');
-        const recipientIds = [...$('ai-form').querySelectorAll('[name="ai-recipient"]:checked')].map(input => input.value);
+        const userIds = [...$('ai-form').querySelectorAll('[name="ai-recipient"]:checked')].map(input => input.value);
+        const groupIds = [...$('ai-form').querySelectorAll('[name="ai-group"]:checked')].map(input => input.value);
+        const selectedGroups = new Set(groupIds);
+        const allowedMembers = new Set([...userIds, ...groups.filter(group => selectedGroups.has(group.id)).flatMap(group => group.memberIds)]);
+        const recipientIds = candidates.filter(person => person.identity && allowedMembers.has(person.id)).map(person => person.id);
         if (!recipientIds.includes(user.id)) throw new Error('请保留当前管理员的授权，以便以后在本机调整配置。');
         const profiles={};for(const name of ['vision','image'])profiles[name]={enabled:$('ai-'+name+'-enabled').checked,baseUrl:$('ai-'+name+'-base-url').value.trim()||$('ai-base-url').value.trim(),model:$('ai-'+name+'-model').value.trim(),key:$('ai-'+name+'-key').value.trim()||saved?.[name]?.key||key};
         const configuration = await createSharedAIConfiguration(box,{baseUrl:$('ai-base-url').value.trim(),model:$('ai-model').value.trim(),key,enabled:$('ai-enabled').checked,searchEnabled,tavilyKey,...profiles,recipientIds,previousConfiguration:config.configuration,history:config.history,approveTrust:reviewTrust,signal:controller.signal});
         if (!valid()) return; $('ai-key').value = ''; $('ai-tavily-key').value='';
         for(const field of profileKeyFields)field.value='';
-        await api('/api/admin/ai',{method:'PUT',body:{mode:'shared_direct',configuration},signal:controller.signal}); if (!valid()) return;
+        await api('/api/admin/ai',{method:'PUT',body:{mode:'shared_direct',configuration,...(config.audience ? {audience:{userIds,groupIds}} : {})},signal:controller.signal}); if (!valid()) return;
         const historyEntry = await sharedAIHistoryEntry(configuration); if (!valid()) return;
         await unlockSharedAIConfiguration(box,{configuration,history:[...(config.history || []),historyEntry],approveTrust,approveEndpoint:async () => true,signal:controller.signal}); if (!valid()) return;
         currentCredential = null; $('dialog').close(); toast('共享 Key 已加密保存，获准设备可直接使用模型与已启用的搜索。'); queueRefresh();
@@ -1526,8 +1786,8 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     if (!cryptoBox?.ready) { await unlockAndRefresh(); if (!cryptoBox?.ready) return; }
     if (!c) return securitySettings();
     const manifest = await cryptoBox.prepareChat(c,reviewTrust);
-    openDialog('这段对话的加密成员',`<p class="dialogcopy">以下收件人来自群主签名的成员记录，版本 ${manifest.payload.revision}。安全码发生变化时会停止发送，不会自动信任新密钥。</p>${manifest.payload.members.map(member => `<div class="security-code"><strong>${esc(person(member.userId,c).displayName)}${member.userId === user.id ? ' · 我' : ''}</strong><code>${esc(formatFingerprint(member.fingerprint))}</code></div>`).join('')}<p class="dialogcopy">首次使用会自动记录安全码；如需独立验证身份，可通过另一条可信渠道核对。新成员不能解密加入前的消息；服务器仍能看到成员、时间、大小与公开资料。</p>${canEdit(c) && c.kind === 'group' ? '<div class="dialogactions"><button class="secondarybtn" id="edit-encrypted-members">管理群成员</button></div>' : ''}`);
-    if (canEdit(c) && c.kind === 'group') {
+    openDialog('这段对话的加密成员',`<p class="dialogcopy">以下收件人来自群主签名的成员记录，版本 ${manifest.payload.revision}。安全码发生变化时会停止发送，不会自动信任新密钥。</p>${manifest.payload.members.map(member => `<div class="security-code"><strong>${esc(person(member.userId,c).displayName)}${member.userId === user.id ? ' · 我' : ''}</strong><code>${esc(formatFingerprint(member.fingerprint))}</code></div>`).join('')}<p class="dialogcopy">首次使用会自动记录安全码；如需独立验证身份，可通过另一条可信渠道核对。新成员不能解密加入前的消息；服务器仍能看到成员、时间、大小与公开资料。</p>${canEdit(c) && displayKind(c) === 'group' ? '<div class="dialogactions"><button class="secondarybtn" id="edit-encrypted-members">管理群成员</button></div>' : ''}`);
+    if (canEdit(c) && displayKind(c) === 'group') {
       const add = document.createElement('button'); add.className = 'sendbtn'; add.id = 'add-encrypted-members'; add.textContent = '添加群成员'; add.onclick = () => run(() => choosePeople('add',c)); $('dialogcontent').querySelector('.dialogactions').prepend(add);
     }
     if ($('edit-encrypted-members')) $('edit-encrypted-members').onclick = () => {
@@ -1539,37 +1799,43 @@ import { createFileSink as openFileSink } from './file-save.mjs';
     if(!archiveRecoveryAvailable) {toast('此服务器暂不支持归档恢复，请升级服务端。');return;}
     if(!cryptoBox?.ready){await unlockAndRefresh();if(!cryptoBox?.ready)return;}
     const box=cryptoBox,generation=epoch,vault=vaultVersion;
-    const archived=chats.filter(c=>c.archived&&c.kind==='direct'&&c.friendshipStatus==='accepted'&&directPeer(c));
-    const version=openDialog('恢复旧聊天记录',`<p class="dialogcopy">重建身份时，旧聊天只是归档，没有删除。恢复会让历史重新可读，新会话与现在的账号不受影响。</p><section class="detailsection" id="archive-own"><h4>使用自己的旧恢复码</h4><p class="dialogcopy">正在读取旧加密身份…</p></section><section class="detailsection" id="archive-assistance"><h4>请好友协助</h4><p class="dialogcopy">好友只会分享双方原有的私聊内容，不会交换恢复码或私人密钥。</p>${archived.length?`<label class="account-form">归档会话<select id="archive-assist-chat">${archived.map(c=>`<option value="${esc(c.id)}" ${selected?.id===c.id?'selected':''}>${esc(c.name)} · ${esc(time(c.updatedAt))}</option>`).join('')}</select></label><div id="archive-assist-status"><p class="dialogcopy">正在读取协助状态…</p></div>`:'<p class="dialogcopy">没有可以协助恢复的好友归档私聊。</p>'}</section><p class="form-error" id="archive-recovery-error" role="alert"></p>`);
+    const archived = (selected ? threadOf(selected.id)?.rooms || [] : chats).filter(c => c.archived && (archiveKeySync
+      ? ['direct','group'].includes(c.kind) && (displayKind(c) === 'group' || c.friendshipStatus === 'accepted')
+      : c.kind === 'direct' && c.friendshipStatus === 'accepted'));
+    const version = openDialog('恢复旧聊天记录',`<section class="detailsection" id="archive-own"><p class="dialogcopy">正在读取归档…</p></section><section class="detailsection" id="archive-assistance"><h4>请好友协助</h4><p class="dialogcopy">好友可以把你们当时都有权阅读的消息和附件重新加密给你。</p>${archived.length?`<label class="account-form">归档会话<select id="archive-assist-chat">${archived.map(c=>`<option value="${esc(c.id)}" ${selected?.id===c.id?'selected':''}>${esc(c.name)} · ${esc(time(c.updatedAt))}</option>`).join('')}</select></label><div id="archive-assist-status"></div>`:'<p class="dialogcopy">暂无可请好友协助的归档会话。</p>'}</section><p class="form-error" id="archive-recovery-error" role="alert"></p>`);
     const valid=()=>dialogCurrent(version)&&box===cryptoBox&&generation===epoch&&vault===vaultVersion&&box.ready&&!securityTransition;
     const error=e=>{if(valid())$('archive-recovery-error').textContent=e?.message||String(e||'');};
     let busy=false, controller=null, assistRequest=0;
     sensitiveDialogCleanup=()=>{ controller?.abort(); };
     async function refreshArchiveHistory(){
-      for(const c of chats.filter(c=>c.archived)){messages.delete(c.id);hasMore.delete(c.id);}
-      if(current&&chat()?.archived)await switchChat(current,false,false);
+      for(const c of chats.filter(c=>c.archived)) await refreshLoadedArchive(c,box);
       await refreshAll();
     }
     async function loadOwn(){
       const identities=await box.listArchivedIdentities();if(!valid())return;
       const restored=identities.filter(r=>r.restored),remaining=identities.filter(r=>!r.restored);
-      $('archive-own').innerHTML=`<h4>使用自己的旧恢复码</h4>${restored.length?`<p class="dialogcopy">此设备已解锁 ${restored.length} 个旧身份。旧会话仍是只读的。</p>`:''}${remaining.length?`<form id="archive-code-form" class="account-form"><label>旧加密身份<select id="archive-key-id">${remaining.map(r=>`<option value="${esc(r.fingerprint)}">${esc(time(r.archivedAt)||'旧身份')} · ${esc(formatFingerprint(r.fingerprint).slice(0,19))}…</option>`).join('')}</select></label><label>旧恢复码<input id="archive-code" type="password" autocomplete="off" spellcheck="false" required placeholder="填写原来的 64 位恢复码"></label><label class="inline-check"><input id="archive-remember" type="checkbox" checked>在这台私人设备保留解锁信息</label><p class="dialogcopy">恢复码只在此设备解锁旧密钥，不会发给服务器或好友。另一台设备仍需重新填写。</p><button class="sendbtn" id="archive-code-submit">解锁旧聊天</button></form>`:'<p class="dialogcopy">'+(restored.length?'所有已保存的旧身份均已恢复。':'此账户没有重建前的加密身份可恢复。')+'</p>'}${restored.length?'<button class="secondarybtn" id="archive-forget">清除此设备的旧密钥解锁信息</button>':''}`;
+      const synced = restored.filter(r => r.synced).length;
+      const summary = !restored.length ? '' : `<p id="archive-restored" class="dialogcopy">已解锁 ${restored.length} 个旧身份。${archiveKeySync ? `其中 ${synced} 个已同步到账号，其他设备登录后可读取对应历史。` : '此服务器支持在当前设备恢复。'}</p>`;
+      const importForm = `<form id="archive-code-form" class="account-form"><label>旧加密身份<select id="archive-key-id">${remaining.map(r=>`<option value="${esc(r.fingerprint)}">${esc(time(r.archivedAt)||'旧身份')} · ${esc(formatFingerprint(r.fingerprint).slice(0,19))}…</option>`).join('')}</select></label><label>当时保存的旧版恢复码<input id="archive-code" type="password" autocomplete="off" spellcheck="false" required></label><p class="dialogcopy">${archiveKeySync ? '只需导入一次。此设备会用你当前的加密身份保护解锁资料，再同步给你的其他设备。' : '当前服务器仅支持在这台设备恢复。'}</p><button class="sendbtn" id="archive-code-submit">恢复聊天记录</button></form>`;
+      $('archive-own').innerHTML = `<h4>我的归档</h4>${summary}${remaining.length ? importForm : !identities.length ? '<p class="dialogcopy">此账号没有需要解锁的旧身份。</p>' : ''}${archiveKeySync && restored.length > synced ? '<button class="secondarybtn" id="archive-sync-retry">重试同步</button>' : ''}${!archiveKeySync && restored.length ? '<button class="secondarybtn" id="archive-forget">清除此设备的旧密钥解锁信息</button>' : ''}`;
+      if ($('archive-sync-retry')) $('archive-sync-retry').onclick=()=>run(async()=>{await loadOwn();await refreshArchiveHistory();});
       if($('archive-code-form'))$('archive-code-form').onsubmit=event=>{
         event.preventDefault();if(busy||!valid())return;
-        const button=$('archive-code-submit'),input=$('archive-code'),keyId=$('archive-key-id').value,remember=$('archive-remember').checked;
+        const button=$('archive-code-submit'),input=$('archive-code'),keyId=$('archive-key-id').value;
         busy=true;button.disabled=true;error('');
         run(async()=>{try{
-          await box.restoreArchivedIdentity(keyId,input.value,{remember});if(!valid())return;
+          const result=await box.restoreArchivedIdentity(keyId,input.value,{remember:true});if(!valid())return;
           input.value='';await loadOwn();if(!valid())return;
-          toast('旧身份已在此设备解锁，正在刷新历史聊天。');await refreshArchiveHistory();
+          toast(result?.synced ? '旧记录已恢复，其他设备登录后也能查看。' : archiveKeySync ? '旧记录已在本机恢复，正在等待同步。' : '旧记录已在这台设备恢复。');await refreshArchiveHistory();
         }catch(e){error(e);if(input.isConnected)input.value='';}finally{busy=false;if(button.isConnected)button.disabled=false;}});
       };
       if($('archive-forget'))$('archive-forget').onclick=()=>run(async()=>{
         if(busy||!valid())return;busy=true;error('');
-        try{await box.forgetArchivedIdentities();if(valid()){await loadOwn();await refreshArchiveHistory();toast('已移除此设备的旧身份解锁信息。');}}
+        try{await box.forgetArchivedIdentities();if(valid()){for (const c of chats.filter(c=>c.archived)) { messages.delete(c.id); hasMore.delete(c.id); } await loadOwn();await refreshArchiveHistory();}}
         catch(e){error(e);}finally{busy=false;}
       });
     }
+    let selectedPeerId = '';
     async function loadAssist(){
       const chooser=$('archive-assist-chat');if(!valid()||!chooser||!box.peerRecovery)return;
       const c=chat(chooser.value);if(!c?.archived)return;
@@ -1578,19 +1844,26 @@ import { createFileSink as openFileSink } from './file-save.mjs';
       try{
         const state=await box.peerRecovery.status(c);
         if(!valid()||stamp!==assistRequest)return;
-        const outgoing=state.outgoing,incoming=state.incoming,peer=directPeer(c);
-        area.innerHTML=`${outgoing?`<p class="dialogcopy">已向 ${esc(peer.displayName)} 发出请求。已收到 ${Number(outgoing.grantedMessages)||0} 条历史消息的解密授权。</p><button class="secondarybtn" id="archive-load-grants">刷新并读取已恢复的消息</button>`:'<button class="secondarybtn" id="archive-request-assist">邀请好友协助恢复</button>'}${incoming?`<div class="policybox"><strong>${esc(peer.displayName)} 请求恢复双方的旧私聊</strong><p>将本机能验证的共同历史重新授权给对方。仅分享这段共同的私聊；不会分享私人笔记、其他聊天或旧恢复码。已有 ${Number(incoming.grantedMessages)||0} 条消息获授权。</p><button class="sendbtn" id="archive-grant-assist">协助恢复共同历史</button><p class="dialogcopy" id="archive-grant-progress" aria-live="polite"></p><button class="secondarybtn" id="archive-grant-stop" hidden>停止</button></div>`:''}<button class="secondarybtn" id="archive-refresh-assist">刷新协助状态</button>`;
+        const ids = state.helperIds || [directPeer(c)?.id].filter(Boolean);
+        if (!ids.length) { area.textContent = '此归档中暂无可协助的好友。'; return; }
+        if (!ids.includes(selectedPeerId)) selectedPeerId = state.incoming?.requesterId || state.outgoing?.helperId || ids[0];
+        if (!ids.includes(selectedPeerId)) selectedPeerId = ids[0];
+        const peer = person(selectedPeerId,c);
+        const outgoing = (state.outgoingRequests || [state.outgoing]).find(request => request?.helperId === peer.id);
+        const incoming = (state.incomingRequests || [state.incoming]).find(request => request?.requesterId === peer.id);
+        area.innerHTML = `${ids.length > 1 ? `<label class="account-form">协助好友<select id="archive-assist-peer">${ids.map(id => `<option value="${esc(id)}" ${id===peer.id?'selected':''}>${esc(person(id,c).displayName)}${state.incomingRequests?.some(r=>r.requesterId===id)?' · 已请求协助':''}</option>`).join('')}</select></label>` : ''}${outgoing?`<p class="dialogcopy">已向 ${esc(peer.displayName)} 发出请求。已收到 ${Number(outgoing.grantedMessages)||0} 条消息的授权。</p><button class="secondarybtn" id="archive-load-grants">查看已恢复的消息</button>`:`<button class="secondarybtn" id="archive-request-assist">邀请 ${esc(peer.displayName)} 协助恢复</button>`}${incoming?`<div class="policybox"><strong>${esc(peer.displayName)} 请求恢复共同历史</strong><p>可分享双方都是原收件人的消息和附件。已有 ${Number(incoming.grantedMessages)||0} 条消息获授权。</p><button class="sendbtn" id="archive-grant-assist">协助恢复共同历史</button><p class="dialogcopy" id="archive-grant-progress" aria-live="polite"></p><button class="secondarybtn" id="archive-grant-stop" hidden>停止</button></div>`:''}<button class="secondarybtn" id="archive-refresh-assist">刷新协助状态</button>`;
+        if ($('archive-assist-peer')) $('archive-assist-peer').onchange = event => { selectedPeerId = event.target.value; run(loadAssist); };
         if($('archive-refresh-assist'))$('archive-refresh-assist').onclick=()=>run(loadAssist);
         if($('archive-load-grants'))$('archive-load-grants').onclick=()=>run(async()=>{await loadAssist();if(valid()){await refreshArchiveHistory();toast('已重新读取历史。');}});
         if($('archive-request-assist'))$('archive-request-assist').onclick=()=>run(async()=>{
           if(busy||!valid())return;const button=$('archive-request-assist');busy=true;button.disabled=true;error('');
-          try{await box.peerRecovery.request(c);if(valid()){toast('恢复请求已发送，请好友打开归档私聊中的恢复入口。');await loadAssist();}}
+          try{await box.prepareChat(c,reviewTrust);if(!valid())return;await box.peerRecovery.request(c,peer.id);if(valid()){toast('恢复请求已发送，请好友打开这段归档会话的恢复入口。');await loadAssist();}}
           catch(e){error(e);}finally{busy=false;if(button.isConnected)button.disabled=false;}
         });
         if($('archive-grant-assist'))$('archive-grant-assist').onclick=()=>run(async()=>{
           if(busy||!valid())return;busy=true;error('');
           const button=$('archive-grant-assist'),stop=$('archive-grant-stop'),progress=$('archive-grant-progress'),refresh=$('archive-refresh-assist');
-          button.disabled=true;chooser.disabled=true;if(refresh)refresh.disabled=true;stop.hidden=false;controller=new AbortController();const signal=controller.signal;transfers.add(controller);
+          button.disabled=true;chooser.disabled=true;if($('archive-assist-peer'))$('archive-assist-peer').disabled=true;if(refresh)refresh.disabled=true;stop.hidden=false;controller=new AbortController();const signal=controller.signal;transfers.add(controller);
           stop.onclick=()=>controller?.abort();
           let before=null,granted=0,skipped=0,attachmentSkipped=0,checked=0;
           try{
@@ -1599,7 +1872,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
             while(valid()&&!signal.aborted){
               const page=await api(`/api/chats/${encodeURIComponent(c.id)}/messages?limit=50${before?'&before='+encodeURIComponent(before):''}`,{signal});
               const rows=(page.messages||[]).map(normalizeMessage);if(!rows.length)break;
-              const result=await box.peerRecovery.grant(c,rows,{signal,approveTrust:reviewTrust,onProgress:state=>{
+              const result=await box.peerRecovery.grant(c,rows,{requesterId:peer.id,signal,approveTrust:reviewTrust,onProgress:state=>{
                 if(valid()&&!signal.aborted)progress.textContent=`已检查 ${checked+(Number(state.processed)||0)} 条，授权 ${granted+(Number(state.granted)||0)} 条${state.chunkCount?' · 正在核验附件 '+state.chunkIndex+'/'+state.chunkCount:''}。`;
               }});
               if(!valid()||signal.aborted)break;
@@ -1609,7 +1882,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
             }
             if(valid()&&!signal.aborted){toast(`历史协助完成：授权 ${granted} 条消息${skipped?'，略过 '+skipped+' 条':''}${attachmentSkipped?'，'+attachmentSkipped+' 个附件未恢复':''}。`);await loadAssist();}
           }catch(e){if(!signal.aborted)error(e);}finally{
-            transfers.delete(controller);controller=null;busy=false;if(button.isConnected)button.disabled=false;if(chooser.isConnected)chooser.disabled=false;if(stop.isConnected)stop.hidden=true;if(refresh?.isConnected)refresh.disabled=false;
+            transfers.delete(controller);controller=null;busy=false;if(button.isConnected)button.disabled=false;if(chooser.isConnected)chooser.disabled=false;if($('archive-assist-peer'))$('archive-assist-peer').disabled=false;if(stop.isConnected)stop.hidden=true;if(refresh?.isConnected)refresh.disabled=false;
           }
         });
       }catch(e){if(valid()&&stamp===assistRequest)area.innerHTML=`<p class="dialogcopy">${esc(e.message)}</p><button class="secondarybtn" id="archive-refresh-assist">重试</button>`;if($('archive-refresh-assist'))$('archive-refresh-assist').onclick=()=>run(loadAssist);}
@@ -1620,7 +1893,7 @@ import { createFileSink as openFileSink } from './file-save.mjs';
   function securitySettings() {
     if(!cryptoBox)return;
     const box=cryptoBox,generation=epoch,vault=vaultVersion,selectedChat=chat();
-    const version=openDialog('聊天加密',`<div class="settingsrow"><span>此设备</span><strong>${box.ready?'已解锁':'已锁定'}</strong></div><div class="security-code"><strong>我的安全码</strong><code id="own-fingerprint">${esc(formatFingerprint(box.fingerprint))||'尚未建立加密身份'}</code><small>用于和朋友核对身份，不需要背诵或保存。</small></div><div class="profile-avatar-tools"><button class="secondarybtn" id="fingerprint-copy" ${box.fingerprint?'':'disabled'}>复制安全码</button>${selectedChat?'<button class="secondarybtn" id="view-chat-security">核对当前会话安全码</button>':''}</div><div class="settingsrow"><span>密钥保护</span><strong>${box.passwordAccess?'账号密码':'待升级'}</strong></div><div class="settingsrow"><span>当前设备</span><button id="security-lock-toggle">${box.ready?'立即锁定':'解锁聊天'}</button></div><div class="settingsrow"><span>可信设备</span><button id="remember-device" ${box.ready?'':'disabled'}>记住此设备</button></div><div class="settingsrow"><span>共用设备</span><button id="forget-device">忘记此设备并锁定</button></div><p class="dialogcopy">登录密码也用于保护加密密钥，不再需要恢复码。正文、引用和附件仍在客户端加密。请使用强密码并保护服务器；能取得登录密码与加密密钥备份的一方可能解密聊天。</p>`);
+    const version=openDialog('聊天加密',`<div class="settingsrow"><span>此设备</span><strong>${box.ready?'已解锁':'已锁定'}</strong></div><div class="security-code"><strong>我的安全码</strong><code id="own-fingerprint">${esc(formatFingerprint(box.fingerprint))||'尚未建立加密身份'}</code><small>用于和朋友核对身份，不需要背诵或保存。</small></div><div class="profile-avatar-tools"><button class="secondarybtn" id="fingerprint-copy" ${box.fingerprint?'':'disabled'}>复制安全码</button>${selectedChat?'<button class="secondarybtn" id="view-chat-security">核对当前会话安全码</button>':''}</div><div class="settingsrow"><span>密钥保护</span><strong>${box.passwordAccess?'账号密码':'待升级'}</strong></div><div class="settingsrow"><span>当前设备</span><button id="security-lock-toggle">${box.ready?'立即锁定':'解锁聊天'}</button></div><div class="settingsrow"><span>可信设备</span><button id="remember-device" ${box.ready?'':'disabled'}>记住此设备</button></div><div class="settingsrow"><span>共用设备</span><button id="forget-device">忘记此设备并锁定</button></div><p class="dialogcopy">登录密码也用于保护加密密钥。正文、引用和附件仍在客户端加密。请使用强密码并保护服务器；能取得登录密码与加密密钥备份的一方可能解密聊天。</p>`);
     const valid=()=>dialogCurrent(version)&&box===cryptoBox&&generation===epoch&&vault===vaultVersion;
     if(archiveRecoveryAvailable){
       const row=document.createElement('div');row.className='settingsrow';row.innerHTML='<span>归档聊天</span><button id="archived-recovery-settings">恢复旧记录</button>';

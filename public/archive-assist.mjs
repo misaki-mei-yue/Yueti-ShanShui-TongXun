@@ -17,20 +17,28 @@ async function verify(payload,signature,key){
 export class ArchiveAssist {
   constructor(box){this.box=box;}
   lock(){/* No session keys or plaintext are cached across decryptions. */}
-  peer(chat,{allowFormer=false}={}){
+  peers(chat){
     this.box.requireReady();
-    const members=chat?.members?.map(member=>member.id);
-    if(!chat?.archived||chat.kind!=='direct'||(!allowFormer&&chat.friendshipStatus!=='accepted')||members?.length!==2||members.includes('ai')||new Set(members).size!==2||!members.includes(this.box.user.id))fail('仅原有两人好友的旧加密私聊支持协助恢复。');
-    return members.find(id=>id!==this.box.user.id);
+    const members=chat?.members?.map(member=>member.id).filter(id=>id!=='ai');
+    if(!chat?.archived||!['direct','group'].includes(chat.kind)||!members||members.length<2||new Set(members).size!==members.length||!members.includes(this.box.user.id))fail('请选择有其他成员的归档加密会话。');
+    return members.filter(id=>id!==this.box.user.id);
   }
   path(chat,suffix=''){return `/api/chats/${encodeURIComponent(chat.id)}/archive-assist${suffix}`;}
-  async status(chat){this.peer(chat);const epoch=this.box.epoch;const value=await this.box.api(this.path(chat));this.box.guard(epoch);return value;}
+  async status(chat){
+    const peers=this.peers(chat),epoch=this.box.epoch;
+    const value=await this.box.api(this.path(chat));this.box.guard(epoch);
+    // Older servers only provide the direct-chat fields.
+    return {...value,helperIds:(value.helperIds||peers).filter(id=>peers.includes(id)),
+      outgoingRequests:value.outgoingRequests||[value.outgoing].filter(Boolean),incomingRequests:value.incomingRequests||[value.incoming].filter(Boolean)};
+  }
   expectedRequest(chat,request,requesterId,targetFingerprint,helperId){
     const expected={v:1,purpose:'archive-assist-request',serverId:this.box.serverId,chatId:chat.id,requestId:request?.requestId,requesterId,targetFingerprint,helperId};
     if(typeof request?.requestId!=='string'||!same(requestPayload(request),expected))fail('协助请求和当前会话或加密身份不一致。');return expected;
   }
-  async request(chat){
-    const helperId=this.peer(chat),box=this.box,epoch=box.epoch;
+  async request(chat,helperId){
+    const peers=this.peers(chat),box=this.box,epoch=box.epoch;
+    if(!helperId&&peers.length===1)helperId=peers[0];
+    if(!peers.includes(helperId))fail('请选择本会话中可以协助的好友。');
     const payload={v:1,purpose:'archive-assist-request',serverId:box.serverId,chatId:chat.id,requestId:crypto.randomUUID(),requesterId:box.user.id,targetFingerprint:box.fingerprint,helperId};
     const signature=await sign(payload,box.privateKey);box.guard(epoch);
     const result=await box.api(this.path(chat),{method:'POST',body:{payload,signature}});box.guard(epoch);
@@ -38,8 +46,10 @@ export class ArchiveAssist {
     await verify(saved,result.outgoing.signature,box.records.get(box.user.id).key);box.guard(epoch);return result;
   }
   async binding(chat,message,ciphertext,part,request,index=null){
-    const box=this.box,e=message.envelope,peer=this.peer(chat,{allowFormer:request.requesterId===box.user.id}),original=box.chains.get(chat.id)?.[e?.revision-1];
-    if(message.contentVersion!==1||!message.id||message.chatId!==chat.id||e?.chatId!==chat.id||e.serverId!==box.serverId||e.senderId!==message.senderId||e.clientId!==message.clientId||!original||await digest(original)!==e.manifestHash||!same(original.payload.members,e.recipients)||e.recipients.length!==2||!e.recipients.some(r=>r.userId===box.user.id)||!e.recipients.some(r=>r.userId===peer))fail('原消息未得到完整的原始签名成员验证。');
+    const box=this.box,e=message.envelope,original=box.chains.get(chat.id)?.[e?.revision-1];
+    const other=request.requesterId===box.user.id?request.helperId:request.requesterId;
+    if((request.requesterId!==box.user.id&&request.helperId!==box.user.id)||!this.peers(chat).includes(other))fail('协助双方与归档会话不一致。');
+    if(message.contentVersion!==1||!message.id||message.chatId!==chat.id||e?.chatId!==chat.id||e.serverId!==box.serverId||e.senderId!==message.senderId||e.clientId!==message.clientId||!original||await digest(original)!==e.manifestHash||!same(original.payload.members,e.recipients)||e.recipients.length<2||e.recipients.some(r=>r.userId==='ai'))fail('原消息未得到完整的原始签名成员验证。');
     const target=e.recipients.find(r=>r.userId===request.requesterId),helper=e.recipients.find(r=>r.userId===request.helperId);
     if(!target||!helper||target.userId===helper.userId||target.fingerprint===request.targetFingerprint||!box.recordFor(helper.userId,helper.fingerprint)||!box.recordFor(target.userId,target.fingerprint))fail('协助恢复的原始身份不一致。');
     return {v:1,purpose:'archive-assist-grant',serverId:box.serverId,chatId:chat.id,requestId:request.requestId,messageId:message.id,clientId:message.clientId,manifestHash:e.manifestHash,cipherHash:await digest(ciphertext),part,index,fileId:part==='message'?null:message.file?.id,helperId:helper.userId,helperFingerprint:helper.fingerprint,requesterId:target.userId,targetFingerprint:request.targetFingerprint};
@@ -71,12 +81,15 @@ export class ArchiveAssist {
       return grants;
     } finally {currentCipher?.fill(0);}
   }
-  async grant(chat,messages,{signal,onProgress,approveTrust}={}){
-    const requesterId=this.peer(chat),box=this.box,epoch=box.epoch;abort(signal);
-    const status=await this.status(chat);if(!status.incoming)fail('对方尚未请求协助恢复。');
+  async grant(chat,messages,{requesterId,signal,onProgress,approveTrust}={}){
+    const peers=this.peers(chat),box=this.box,epoch=box.epoch;abort(signal);
+    const status=await this.status(chat);
+    if(!requesterId&&status.incomingRequests.length===1)requesterId=status.incomingRequests[0].requesterId;
+    const incoming=status.incomingRequests.find(entry=>entry.requesterId===requesterId);
+    if(!incoming||!peers.includes(requesterId))fail('对方尚未请求协助恢复，或需要选择一位请求人。');
     const [target]=await box.getRecords([requesterId],approveTrust);abort(signal);box.guard(epoch);
-    const request=this.expectedRequest(chat,status.incoming,requesterId,target.fingerprint,box.user.id);
-    await verify(request,status.incoming.signature,target.key);await box.prepareChat(chat,approveTrust);abort(signal);box.guard(epoch);
+    const request=this.expectedRequest(chat,incoming,requesterId,target.fingerprint,box.user.id);
+    await verify(request,incoming.signature,target.key);await box.prepareChat(chat,approveTrust);abort(signal);box.guard(epoch);
     let granted=0,skipped=0,attachmentSkipped=0,processed=0;
     for(const message of messages) {
       abort(signal);box.guard(epoch);
@@ -113,10 +126,12 @@ export class ArchiveAssist {
   }
   async decryptionOptionsFor(chat,message,ciphertext,{part='message',index=null}={}){
     const box=this.box,epoch=box.epoch;
-    if(!['message','attachment','chunk'].includes(part)||(part==='chunk'?(!Number.isSafeInteger(index)||index<0):index!==null)||!chat?.archived||chat.kind!=='direct')return null;
-    const helperId=this.peer(chat,{allowFormer:true}),path=this.path(chat,`/grants/${encodeURIComponent(message.id)}/${part}${part==='chunk'?`/${index}`:''}`);
+    if(!['message','attachment','chunk'].includes(part)||(part==='chunk'?(!Number.isSafeInteger(index)||index<0):index!==null)||!chat?.archived||!['direct','group'].includes(chat.kind))return null;
+    if(!chat.members?.some(m=>m.id!==box.user.id&&m.id!=='ai'))return null;
+    const peers=this.peers(chat),path=this.path(chat,`/grants/${encodeURIComponent(message.id)}/${part}${part==='chunk'?`/${index}`:''}`);
     let result;try{result=await box.api(path);}catch(error){if(error.status===403||error.status===404)return null;throw error;}
     box.guard(epoch);if(!result.grant)return null;
+    const helperId=result.request?.payload?.helperId;if(!peers.includes(helperId))fail('协助人不属于归档会话。');
     const request=this.expectedRequest(chat,result.request?.payload,box.user.id,box.fingerprint,helperId);
     await verify(request,result.request.signature,box.records.get(box.user.id).key);
     const expected=await this.binding(chat,message,ciphertext,part,request,index),{encryptedSessionKey,...actual}=result.grant.payload||{};

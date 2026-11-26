@@ -140,7 +140,10 @@ export class CryptoBox {
     if (!api || !user?.id || !serverId) fail('加密账户信息不完整。');
     this.api=api; this.user=user; this.serverId=serverId; this.storage=storage||new Vault();
     this.peerRecovery=new ArchiveAssist(this);
+    this.messageManifestLoads=new WeakMap();
     this.scope=`${serverId}:${user.id}:`; this.identity=null; this.privateKey=null; this.code=null;
+    this.archiveSyncAvailable=false;this.pendingArchiveAccess=new Map();this.verifiedArchiveAccess=new Map();
+    this.archiveSyncStamp=null;this.archiveRetryAt=0;this.archiveTrustAttempts=new Map();
     this.records=new Map();this.historicalRecords=new Map();this.archivedPrivateKeys=new Map();this.archivedFingerprints=new Set();this.archiveRestoreError=null; this.chains=new Map(); this.epoch=0; this.passwordAccess=null;this.passwordAccessProof=null;this.rememberError=null;this.passwordMode=false;this.pendingReset=null;
   }
   get fingerprint() { return this.identity?.fingerprint || ''; }
@@ -174,6 +177,10 @@ export class CryptoBox {
     await key.getEncryptionKey();
     return {...record,key};
   }
+  async devicePassphrase(wrapped) {
+    const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:wrapped.iv,additionalData:utf8.encode(this.scope)},wrapped.key,wrapped.bytes));
+    try{return new TextDecoder().decode(bytes);}finally{bytes.fill(0);}
+  }
   async initialize(options={}) {
     const usePassword=options.passwordAccess===true||typeof options.password==='string',password=options.password,remember=options.remember!==false;
     this.passwordMode=usePassword;
@@ -202,9 +209,9 @@ export class CryptoBox {
     if(epoch!==this.epoch) fail('加密会话已关闭。');
     if (wrapped) {
       try {
-        const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:wrapped.iv,additionalData:utf8.encode(this.scope)},wrapped.key,wrapped.bytes));
+        const passphrase=await this.devicePassphrase(wrapped);
         if(epoch!==this.epoch) fail('加密会话已关闭。');
-        try { await this.unlock(new TextDecoder().decode(bytes)); } finally {bytes.fill(0);}
+        await this.unlock(passphrase);
       } catch { if(epoch===this.epoch)await this.storage.delete(this.scope+'remembered'); }
     }
     if(epoch!==this.epoch) { await this.lock(); fail('加密会话已关闭。'); }
@@ -302,8 +309,10 @@ export class CryptoBox {
   async createPasswordIdentity(password,{remember=true}={}) {
     this.passwordMode=true;
     if(this.identity)fail('加密身份已存在，请使用账户密码解锁。');
-    await this.createIdentity({deferRegistration:true});
-    const epoch=this.epoch,{identity,privateKey,code}=this.pendingIdentity;
+    const epoch=this.epoch,pending=this.pendingIdentity||await generateIdentity(this);
+    if(epoch!==this.epoch)fail('加密初始化已取消。');
+    this.pendingIdentity=pending;
+    const {identity,privateKey,code}=pending;
     const {access,proof}=await sealPasswordAccess(this,password,identity,privateKey,code,1);
     if(epoch!==this.epoch||this.pendingIdentity?.identity!==identity)fail('加密初始化已取消。');
     await this.registerIdentity({password,access,accessProof:proof});
@@ -357,10 +366,23 @@ export class CryptoBox {
     const code=await openPasswordAccess(this,password,this.passwordAccess,this.fingerprint);
     if(epoch!==this.epoch)fail('加密会话已关闭。');
     await this.unlock(code,{acceptReset:true});try{
+      // An older trusted installation may still hold the previous identity's
+      // only usable passphrase. Preserve it before replacing the device vault.
+      this.records.set(this.user.id,pending.record);
+      const wrapped=await this.storage.get(this.scope+'remembered');
+      if(wrapped){
+        const previousCode=await this.devicePassphrase(wrapped).catch(()=>null);
+        const localKey=this.archivedCodeKey(pending.previous);
+        if(previousCode!==code&&/^[0-9A-F]{64}$/.test(previousCode||'')&&!await this.storage.get(localKey)){
+          const ciphertext=await this.encryptLocal({v:1,purpose:'historical-key-code',fingerprint:pending.previous,code:previousCode});
+          this.guard(epoch);await this.storage.set(localKey,ciphertext);
+        }
+      }
       this.guard(epoch);await this.repin(pending.record,pending.previous);this.guard(epoch);
-      await this.storage.set(this.scope+'own-identity',this.fingerprint);this.records.set(this.user.id,pending.record);
+      await this.storage.set(this.scope+'own-identity',this.fingerprint);
       await this.storage.delete(this.scope+'ai-private-memory-pin');this.archivedFingerprints.add(pending.previous);this.pendingReset=null;
-      await this.tryRemember(remember);this.guard(epoch);return this.identity;
+      await this.tryRemember(remember);this.guard(epoch);
+      await this.loadRememberedArchivedIdentities();this.guard(epoch);return this.identity;
     }catch(e){await this.lock();throw e;}
   }
   async resetPasswordIdentity(password,{remember=true}={}) {
@@ -413,6 +435,7 @@ export class CryptoBox {
   }
   async lock({forget=false}={}) {
     this.epoch++; this.privateKey=null; this.code=null; this.pendingIdentity=null; this.archivedPrivateKeys.clear();this.chains.clear();this.peerRecovery?.lock?.();
+    this.pendingArchiveAccess.clear();this.verifiedArchiveAccess.clear();this.archiveSyncStamp=null;this.archiveTrustAttempts.clear();
     if (forget) {await this.storage.delete(this.scope+'remembered');await this.forgetArchivedIdentities();}
   }
   get restoredArchivedIdentities() { return [...this.archivedPrivateKeys.keys()]; }
@@ -420,7 +443,7 @@ export class CryptoBox {
   archivedCodeKey(fingerprint) { return `${this.scope}archived-code:${this.fingerprint}:${fingerprint}`; }
   async archivedIdentities() {
     this.requireReady();const epoch=this.epoch;
-    const {identities}=await this.api('/api/e2ee/archived-identities');this.guard(epoch);
+    const {identities,accountSync}=await this.api('/api/e2ee/archived-identities');this.guard(epoch);
     if(!Array.isArray(identities)||identities.length>64||new Set(identities.map(record=>record?.fingerprint)).size!==identities.length)fail('历史加密身份资料无效。');
     for(const identity of identities) {
       if(identity?.userId!==this.user.id||identity.fingerprint===this.fingerprint||!this.archivedFingerprints.has(identity.fingerprint)||typeof identity.archivedAt!=='string'||!isArmor(identity.encryptedPrivateKey,'PRIVATE KEY BLOCK')||identity.encryptedPrivateKey.length>80000||!isArmor(identity.proof,'SIGNATURE')||identity.proof.length>16000)fail('历史加密身份不属于当前账户，或数据已修改。');
@@ -430,10 +453,13 @@ export class CryptoBox {
       const result=await pgp.verify({message:await pgp.createMessage({text:canonical(binding)}),signature:await pgp.readSignature({armoredSignature:identity.proof}),verificationKeys:record.key,expectSigned:true});
       if(result.signatures.length!==1)fail('历史身份签名无效。');await result.signatures[0].verified;this.guard(epoch);
     }
+    this.archiveSyncAvailable=accountSync===true;
     return identities;
   }
   async listArchivedIdentities() {
-    return (await this.archivedIdentities()).map(({fingerprint,archivedAt})=>({fingerprint,archivedAt,restored:this.hasArchivedIdentity(fingerprint)}));
+    const records=await this.archivedIdentities();
+    await this.loadRememberedArchivedIdentities(records);
+    return records.map(({fingerprint,archivedAt})=>({fingerprint,archivedAt,restored:this.hasArchivedIdentity(fingerprint),synced:this.verifiedArchiveAccess.has(fingerprint)}));
   }
   async unlockArchivedRecord(identity,code,epoch) {
     this.guard(epoch);
@@ -445,41 +471,112 @@ export class CryptoBox {
     if(key.getFingerprint()!==identity.fingerprint)fail('恢复的历史私钥与原身份不一致。');
     this.guard(epoch);return key;
   }
+  async archiveAccessBinding(archivedFingerprint,ciphertext) {
+    return {v:1,purpose:'archived-identity-access',serverId:this.serverId,userId:this.user.id,
+      activeFingerprint:this.fingerprint,archivedFingerprint,ciphertextHash:await digest(ciphertext)};
+  }
+  async applyArchivedKey(fingerprint,key,epoch) {
+    this.guard(epoch);
+    // Trust this key for historical signatures, never for new messages.
+    await this.storage.set(this.historyPin(this.user.id,fingerprint),true);this.guard(epoch);
+    this.archivedPrivateKeys.set(fingerprint,key);
+  }
+  async publishArchivedAccess(fingerprint,ciphertext,epoch) {
+    const binding=await this.archiveAccessBinding(fingerprint,ciphertext);
+    this.guard(epoch);
+    const {signature:proof}=await this.signManifest(binding);
+    const result=await this.api('/api/e2ee/archived-access',{method:'PUT',body:{
+      activeFingerprint:binding.activeFingerprint,archivedFingerprint:fingerprint,ciphertext,proof}});
+    this.guard(epoch);
+    if(result.ciphertextHash!==binding.ciphertextHash)fail('服务器未确认保存历史聊天解锁资料。');
+    this.verifiedArchiveAccess.set(fingerprint,{ciphertext,proof});
+    this.pendingArchiveAccess.delete(fingerprint);
+  }
+  async recoverArchivedAccess(identity,ciphertext,proof,epoch) {
+    if(typeof ciphertext!=='string'||ciphertext.length>12000||!isArmor(ciphertext,'MESSAGE'))fail('历史聊天同步资料格式不正确。');
+    if(proof!==undefined){
+      if(!isArmor(proof,'SIGNATURE')||proof.length>16000)fail('历史聊天同步签名无效。');
+      const binding=await this.archiveAccessBinding(identity.fingerprint,ciphertext);
+      const signed=await pgp.verify({message:await pgp.createMessage({text:canonical(binding)}),
+        signature:await pgp.readSignature({armoredSignature:proof}),verificationKeys:this.records.get(this.user.id).key,expectSigned:true});
+      if(signed.signatures.length!==1)fail('历史聊天同步签名无效。');
+      await signed.signatures[0].verified;
+    }
+    const value=await this.decryptLocal(ciphertext);
+    if(value?.v!==1||value.purpose!=='historical-key-code'||value.fingerprint!==identity.fingerprint||Object.keys(value).length!==4)fail('历史聊天解锁资料与旧身份不符。');
+    const key=await this.unlockArchivedRecord(identity,value.code,epoch);
+    await this.applyArchivedKey(identity.fingerprint,key,epoch);
+  }
   async restoreArchivedIdentity(fingerprint,oldCode,{remember=true}={}) {
     this.requireReady();const epoch=this.epoch,code=cleanCode(oldCode);
     const identity=(await this.archivedIdentities()).find(record=>record.fingerprint===fingerprint);
     if(!identity)fail('所选历史加密身份不存在。');
     const key=await this.unlockArchivedRecord(identity,code,epoch);
-    if(remember) {
-      const ciphertext=await this.encryptLocal({v:1,purpose:'historical-key-code',fingerprint,code});
-      this.guard(epoch);await this.storage.set(this.archivedCodeKey(fingerprint),ciphertext);
-    } else {await this.storage.delete(this.archivedCodeKey(fingerprint));}
+    const ciphertext=await this.encryptLocal({v:1,purpose:'historical-key-code',fingerprint,code});
     this.guard(epoch);
-    // This pin is used only to verify old signed history, never to change the
-    // currently authenticated public identity or authorize sending with old keys.
-    await this.storage.set(this.historyPin(this.user.id,fingerprint),true);this.guard(epoch);
-    this.archivedPrivateKeys.set(fingerprint,key);this.archiveRestoreError=null;
-    return {fingerprint,archivedAt:identity.archivedAt,restored:true};
+    if(remember)await this.storage.set(this.archivedCodeKey(fingerprint),ciphertext);
+    else await this.storage.delete(this.archivedCodeKey(fingerprint));
+    await this.applyArchivedKey(fingerprint,key,epoch);
+    this.archiveRestoreError=null;
+    let synced=false;
+    if(this.archiveSyncAvailable){
+      this.pendingArchiveAccess.set(fingerprint,ciphertext);
+      try {await this.publishArchivedAccess(fingerprint,ciphertext,epoch);synced=true;}
+      catch(error){this.guard(epoch);this.archiveRestoreError='本机已恢复，账号同步待重试。'+error.message;}
+    }
+    return {fingerprint,archivedAt:identity.archivedAt,restored:true,synced};
   }
-  async loadRememberedArchivedIdentities() {
-    this.requireReady();const epoch=this.epoch;
-    this.archiveRestoreError=null;const saved=[];
+  async loadRememberedArchivedIdentities(records) {
+    this.requireReady();const epoch=this.epoch,previous=this.archivedPrivateKeys.size;
+    this.archiveRestoreError=null;
+    if(!this.archivedFingerprints.size)return 0;
     try {
-      for(const fingerprint of this.archivedFingerprints){const ciphertext=await this.storage.get(this.archivedCodeKey(fingerprint));this.guard(epoch);if(ciphertext)saved.push({fingerprint,ciphertext});}
-      if(!saved.length)return;
-      const identities=await this.archivedIdentities();
-      for(const {fingerprint,ciphertext} of saved) {
-        const identity=identities.find(record=>record.fingerprint===fingerprint);
-        if(!identity)fail('已保存的历史加密身份不存在。');
-        const value=await this.decryptLocal(ciphertext);
-        if(value?.v!==1||value.purpose!=='historical-key-code'||value.fingerprint!==fingerprint||Object.keys(value).length!==4)fail('历史密钥本机保存记录不正确。');
-        const key=await this.unlockArchivedRecord(identity,value.code,epoch);
-        await this.storage.set(this.historyPin(this.user.id,fingerprint),true);this.guard(epoch);this.archivedPrivateKeys.set(fingerprint,key);
+      const identities=records||await this.archivedIdentities();
+      for(const identity of identities){
+        this.guard(epoch);
+        try {
+          const fingerprint=identity.fingerprint,remote=identity.accountAccess;
+          if(remote){
+            if(!isArmor(remote.proof,'SIGNATURE'))fail('历史聊天同步签名缺失。');
+            const verified=this.verifiedArchiveAccess.get(fingerprint);
+            if(!this.hasArchivedIdentity(fingerprint)||verified?.ciphertext!==remote.ciphertext||verified?.proof!==remote.proof){
+              await this.recoverArchivedAccess(identity,remote.ciphertext,remote.proof,epoch);
+              this.verifiedArchiveAccess.set(fingerprint,{ciphertext:remote.ciphertext,proof:remote.proof});
+            }
+            this.pendingArchiveAccess.delete(fingerprint);
+            continue;
+          }
+          this.verifiedArchiveAccess.delete(fingerprint);
+          const local=this.pendingArchiveAccess.get(fingerprint)||await this.storage.get(this.archivedCodeKey(fingerprint));
+          this.guard(epoch);if(!local)continue;
+          if(!this.hasArchivedIdentity(fingerprint))await this.recoverArchivedAccess(identity,local,undefined,epoch);
+          if(this.archiveSyncAvailable)await this.publishArchivedAccess(fingerprint,local,epoch);
+        } catch(error){this.guard(epoch);this.archiveRestoreError=error.message||'历史聊天同步失败，请重试。';}
       }
-    }catch(error){if(epoch===this.epoch&&this.ready)this.archiveRestoreError=error.message||'未能自动恢复旧聊天，请重新输入旧版恢复码。';else throw error;}
+    }catch(error){this.guard(epoch);this.archiveRestoreError=error.message||'历史聊天同步失败，请重试。';}
+    return this.archivedPrivateKeys.size-previous;
+  }
+  async refreshArchivedAccess(stamp,chats=[]) {
+    const generation=this.epoch;
+    if(this.ready)for(const chat of chats){
+      if(!chat.archived||chat.archiveTrustSynced!==false||!chat.e2eeRevision||this.archiveTrustAttempts.get(chat.id)>Date.now())continue;
+      this.archiveTrustAttempts.set(chat.id,Date.now()+60000);
+      const pin=await this.storage.get(this.scope+'chat:'+chat.id);this.guard(generation);
+      if(pin?.revision===chat.e2eeRevision&&pin.ownerId===chat.ownerId){
+        // Includes a 1.5.1 installation which previously read this archive.
+        // This value was pinned only after the entire signed chain passed.
+        await this.publishArchiveTrust(chat,pin,generation);
+      }
+    }
+    if(typeof stamp!=='string'||!this.ready||!this.archivedFingerprints.size)return 0;
+    const retry=this.archiveRestoreError||this.pendingArchiveAccess.size;
+    if(this.archiveSyncStamp===stamp&&(!retry||Date.now()<this.archiveRetryAt))return 0;
+    const epoch=this.epoch,count=await this.loadRememberedArchivedIdentities();
+    this.guard(epoch);this.archiveSyncStamp=stamp;this.archiveRetryAt=Date.now()+30000;
+    return count;
   }
   async forgetArchivedIdentities() {
-    this.epoch++;this.archivedPrivateKeys.clear();this.archiveRestoreError=null;
+    this.epoch++;this.archivedPrivateKeys.clear();this.pendingArchiveAccess.clear();this.verifiedArchiveAccess.clear();this.archiveRestoreError=null;this.archiveSyncStamp=null;
     for(const fingerprint of this.archivedFingerprints) await this.storage.delete(this.archivedCodeKey(fingerprint));
   }
   decryptionKeyFor(message) {
@@ -556,7 +653,33 @@ export class CryptoBox {
     this.guard(epoch); records.forEach(r=>this.records.set(r.userId,r));
     return records;
   }
-  async getHistoricalRecords(chat,manifests,approveTrust) {
+  archiveTrustBinding(chat,pin) {
+    return {v:1,purpose:'archived-chat-trust',serverId:this.serverId,userId:this.user.id,
+      activeFingerprint:this.fingerprint,chatId:chat.id,ownerId:pin.ownerId,revision:pin.revision,manifestHash:pin.hash};
+  }
+  async publishArchiveTrust(chat,pin,epoch) {
+    this.archiveTrustAttempts.set(chat.id,Date.now()+60000);
+    try{
+      const {signature:proof}=await this.signManifest(this.archiveTrustBinding(chat,pin));this.guard(epoch);
+      const result=await this.api(`/api/chats/${encodeURIComponent(chat.id)}/archive-trust`,{method:'PUT',body:{revision:pin.revision,manifestHash:pin.hash,proof}});
+      this.guard(epoch);if(result.manifestHash!==pin.hash)fail('归档成员核验记录未正确保存。');
+    }catch(error){
+      // Reading locally verified history remains available while offline.
+      this.guard(epoch);
+    }
+  }
+  async verifyArchiveTrust(chat,manifests,proof) {
+    if(!isArmor(proof,'SIGNATURE')||proof.length>16000)fail('已同步的归档成员签名无效。');
+    const pin={ownerId:chat.ownerId,revision:manifests.length,hash:await digest(manifests.at(-1))};
+    const verified=await pgp.verify({message:await pgp.createMessage({text:canonical(this.archiveTrustBinding(chat,pin))}),
+      signature:await pgp.readSignature({armoredSignature:proof}),verificationKeys:this.records.get(this.user.id).key,expectSigned:true});
+    if(verified.signatures.length!==1)fail('已同步的归档成员签名无效。');
+    await verified.signatures[0].verified;
+    // Before using any of the signed historical identities, check that every
+    // revision belongs to the exact chain previously verified by this account.
+    for(let i=1;i<manifests.length;i++)if(manifests[i].payload.previousHash!==await digest(manifests[i-1]))fail('归档成员链已更改。');
+  }
+  async getHistoricalRecords(chat,manifests,approveTrust,archiveTrustProof) {
     this.requireReady();const epoch=this.epoch,expected=new Map();
     for(const signed of manifests) {
       const members=signed?.payload?.members;
@@ -576,7 +699,10 @@ export class CryptoBox {
       if(prior!==raw.fingerprint&&!trusted&&!(raw.userId===this.user.id&&raw.fingerprint===this.fingerprint))unknown.push({userId:raw.userId,fingerprint:raw.fingerprint,historical:true,...(prior?{previousFingerprint:prior}:{})});
       records.push(record);
     }
-    if(unknown.length) {
+    if(unknown.length&&chat.archived&&archiveTrustProof){
+      await this.verifyArchiveTrust(chat,manifests,archiveTrustProof);
+      this.guard(epoch);
+    }else if(unknown.length) {
       if(!approveTrust||!await approveTrust(unknown))fail('尚未确认历史联系人的安全指纹。');
       this.guard(epoch);
       for(const raw of unknown)await this.storage.set(this.historyPin(raw.userId,raw.fingerprint),true);
@@ -604,7 +730,7 @@ export class CryptoBox {
   async prepareChat(chat,approveTrust) {
     this.requireReady(); const epoch=this.epoch;
     if(!chat?.id || !chat.ownerId) fail('会话尚未支持加密，请升级服务器。');
-    let {manifests}=await this.api(`/api/chats/${encodeURIComponent(chat.id)}/manifests`);
+    let {manifests,archiveTrustProof}=await this.api(`/api/chats/${encodeURIComponent(chat.id)}/manifests`);
     if(!Array.isArray(manifests) || manifests.length>10000) fail('聊天成员记录无效。');
     const humanIds=(chat.members||[]).map(m=>m.id).filter(id=>id!=='ai');
     if((['notes','ai'].includes(chat.kind)&&(humanIds.length!==1||humanIds[0]!==this.user.id))||(chat.kind==='direct'&&humanIds.length!==2)) fail('会话的加密成员数量不正确。');
@@ -628,7 +754,7 @@ export class CryptoBox {
       // Each historical signature is verified with that revision's exact key;
       // sending to a new active chat still requires the current trusted keys.
       if(!chat.archived)await this.getRecords(humanIds,approveTrust);
-      await this.getHistoricalRecords(chat,manifests,approveTrust);
+      await this.getHistoricalRecords(chat,manifests,approveTrust,archiveTrustProof);
     }else{
       const ids=manifests.flatMap(m=>m.payload?.members?.map(r=>r.userId)||[]);
       await this.getRecords(ids,approveTrust);
@@ -650,6 +776,7 @@ export class CryptoBox {
     else await this.storage.set(pinKey,newPin);
     this.guard(epoch);
     this.chains.set(chat.id,manifests);
+    if(chat.archived&&archiveTrustProof===null)await this.publishArchiveTrust(chat,newPin,epoch);
     return latest;
   }
   async updateMembers(chat,userIds,approveTrust) {
@@ -688,8 +815,20 @@ export class CryptoBox {
     const e=message.envelope;
     if(e.v!==1 || e.serverId!==this.serverId || e.chatId!==chat.id || message.chatId!==chat.id || e.senderId!==message.senderId || e.clientId!==message.clientId || !isArmor(e.ciphertext,'MESSAGE')) fail('消息路由或发送者校验失败。');
     let chain=this.chains.get(chat.id);
-    if(!chain || !chain[e.revision-1]) { await this.prepareChat(chat); chain=this.chains.get(chat.id); }
-    const manifest=chain[e.revision-1];
+    if(!chain?.[e.revision-1]) {
+      // A page of history uses the same physical room snapshot. Only share a
+      // read within this unlocked identity. Each envelope is still verified.
+      let load=this.messageManifestLoads.get(chat);
+      if(!load || load.epoch!==epoch) {
+        load={epoch,promise:this.prepareChat(chat)};
+        this.messageManifestLoads.set(chat,load);
+      }
+      try { await load.promise; }
+      finally { if(this.messageManifestLoads.get(chat)===load)this.messageManifestLoads.delete(chat); }
+      this.guard(epoch);
+      chain=this.chains.get(chat.id);
+    }
+    const manifest=chain?.[e.revision-1];
     if(!manifest || await digest(manifest)!==e.manifestHash || !same(manifest.payload.members,e.recipients)) fail('消息收件人与签名成员记录不一致。');
     const sender=this.recordFor(e.senderId,e.senderFingerprint);
     if(!sender || sender.fingerprint!==e.senderFingerprint || !e.recipients.some(r=>r.userId===e.senderId&&r.fingerprint===e.senderFingerprint)) fail('消息发送者不属于已验证的成员。');
